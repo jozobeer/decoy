@@ -1,0 +1,63 @@
+name: Feature / Enhancement
+description: 機能追加・改善の提案
+title: "[feat] "
+labels: ["type:feat"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何を追加・変更したいか、1〜3行で
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: なぜ必要か（Why）
+      description: この変更が無いと何が困るか
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dream-impact
+    attributes:
+      label: Dream への影響
+      description: |
+        このプロダクトの存在理由（Dream）に対してどう作用するか。
+        - 進化：Dream を強化する
+        - 保護：Dream の純度を保つ補強
+        - 変質：Dream の中身そのものに踏み込む（要レビュー）
+        - 無関係：技術的副作用のみ
+      options:
+        - 進化
+        - 保護
+        - 変質（要レビュー）
+        - 無関係
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件（テスト = 仕様）
+      description: |
+        TDD 前提なので、ここに書いた条件が `tdd-spec` でテスト化される。
+        できる限り具体的に：「Xを入力したらYが返る」「副作用としてZが起きる」
+    validations:
+      required: true
+
+  - type: textarea
+    id: anti-goals
+    attributes:
+      label: やらないこと
+      description: スコープ外の関連作業を明示（次 Issue 候補）
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
+    validations:
+      required: false

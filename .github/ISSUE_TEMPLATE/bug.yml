@@ -1,0 +1,54 @@
+name: Bug
+description: バグ報告
+title: "[bug] "
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 何が起きたか
+      description: 観測した挙動（エラーメッセージ・ログがあれば貼る）
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した挙動
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      description: 1. ... 2. ... 3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 深刻度
+      options:
+        - critical（機能停止）
+        - major（一部機能停止）
+        - minor（回避可能）
+        - cosmetic（表示・ログのみ）
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 環境
+      description: OS / ランタイム version / 関連 dep version
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
+    validations:
+      required: false

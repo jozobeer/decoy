@@ -1,0 +1,50 @@
+# Label definitions for Decoy
+#
+# .github/workflows/sync-labels.yml が真実の出典としてこのファイルを参照し、
+# リポのラベルを自動同期する。delete-other-labels: true なので yml に無い
+# ラベルは削除される。
+
+# ─── type: 種類 (Issue type) ──────────
+- name: "type:feat"
+  color: "1d76db"
+  description: "新機能"
+- name: "type:bug"
+  color: "d73a4a"
+  description: "バグ"
+- name: "type:enhance"
+  color: "a2eeef"
+  description: "既存機能の改善"
+- name: "type:refactor"
+  color: "c5def5"
+  description: "内部構造の整理"
+- name: "type:docs"
+  color: "0075ca"
+  description: "ドキュメント"
+- name: "type:test"
+  color: "bfdadc"
+  description: "テスト追加・改善"
+- name: "type:chore"
+  color: "fef2c0"
+  description: "雑務（依存更新・CI 等）"
+
+# ─── priority: 優先度 ─────────
+- name: "priority:high"
+  color: "b60205"
+  description: "最優先"
+- name: "priority:medium"
+  color: "d93f0b"
+  description: "通常"
+- name: "priority:low"
+  color: "fbca04"
+  description: "後でいい"
+
+# ─── 特殊挙動制御 ────
+- name: "human-needed"
+  color: "fbca04"
+  description: "人間判断待ち"
+- name: "dream-impact"
+  color: "fef2c0"
+  description: "Dream に踏み込む変更（要レビュー）"
+- name: "experimental"
+  color: "bfd4f2"
+  description: "実験枠 — auto-merge しない"
