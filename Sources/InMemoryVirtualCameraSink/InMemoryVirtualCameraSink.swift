@@ -6,6 +6,6 @@ public actor InMemoryVirtualCameraSink: VirtualCameraSink {
     public init() {}
 
     public func send(_ frame: Frame) async throws {
-        // tdd-impl phase: not yet implemented
+        frames.append(frame)
     }
 }
