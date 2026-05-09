@@ -7,14 +7,14 @@ public actor InMemoryClipStore: ClipStore {
     public init() {}
 
     public func save(_ clip: Clip) async throws {
-        // tdd-impl phase: not yet implemented
+        clips[clip.id] = clip
     }
 
     public func all() async throws -> [Clip] {
-        []
+        clips.values.sorted { $0.recordedAt < $1.recordedAt }
     }
 
     public func clip(id: UUID) async throws -> Clip? {
-        nil
+        clips[id]
     }
 }
