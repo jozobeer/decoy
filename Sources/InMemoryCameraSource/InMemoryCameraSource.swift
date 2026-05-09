@@ -9,7 +9,11 @@ public actor InMemoryCameraSource: CameraSource {
     }
 
     public func frames() async -> AsyncStream<Frame> {
-        // tdd-impl phase: not yet implemented
-        AsyncStream { $0.finish() }
+        subscribeCount += 1
+        let snapshot = preset
+        return AsyncStream { continuation in
+            snapshot.forEach { continuation.yield($0) }
+            continuation.finish()
+        }
     }
 }
