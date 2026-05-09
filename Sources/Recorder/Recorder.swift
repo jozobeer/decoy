@@ -8,6 +8,13 @@ public actor Recorder {
     }
 
     public func handle(_ command: AppCommand) {
-        // tdd-impl phase: not yet implemented
+        switch command {
+        case .startRecording:
+            state = .recording
+        case .stopRecording:
+            state = .idle
+        case .startDecoy, .returnToLive:
+            break
+        }
     }
 }

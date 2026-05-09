@@ -8,6 +8,13 @@ public actor Broadcaster {
     }
 
     public func handle(_ command: AppCommand) {
-        // tdd-impl phase: not yet implemented
+        switch command {
+        case .startDecoy(let mode):
+            state = .playback(mode)
+        case .returnToLive:
+            state = .live
+        case .startRecording, .stopRecording:
+            break
+        }
     }
 }
