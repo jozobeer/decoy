@@ -22,9 +22,15 @@
 # Logs
 *.log
 
+# Swift / SPM
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+# Package.resolved はライブラリでは commit する。アプリ単体なら ignore でも可
+
 # 言語別追加（必要に応じて scaffold 時に append）
 # Rust:        target/, Cargo.lock (libの場合は除外しない)
 # Node:        node_modules/, dist/, .next/, *.tsbuildinfo
 # Python:      __pycache__/, *.pyc, .venv/, dist/, build/
-# Swift:       .build/, DerivedData/, Package.resolved (libの場合は除外しない)
 # Go:          bin/, vendor/
