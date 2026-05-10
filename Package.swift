@@ -25,6 +25,7 @@ let package = Package(
             name: "Recorder",
             dependencies: [
                 "Domain",
+                "DependencyInjection",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
