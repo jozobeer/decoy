@@ -14,6 +14,10 @@ let package = Package(
         .library(name: "InMemoryClipStore", targets: ["InMemoryClipStore"]),
         .library(name: "InMemoryVirtualCameraSink", targets: ["InMemoryVirtualCameraSink"]),
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
+        .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.12.0"),
     ],
     targets: [
         .target(name: "Domain"),
@@ -22,6 +26,16 @@ let package = Package(
         .target(name: "InMemoryClipStore", dependencies: ["Domain"]),
         .target(name: "InMemoryVirtualCameraSink", dependencies: ["Domain"]),
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
+        .target(
+            name: "DependencyInjection",
+            dependencies: [
+                "Domain",
+                "InMemoryClipStore",
+                "InMemoryVirtualCameraSink",
+                "InMemoryCameraSource",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .testTarget(name: "RecorderTests", dependencies: ["Recorder", "Domain"]),
         .testTarget(name: "BroadcasterTests", dependencies: ["Broadcaster", "Domain"]),
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),

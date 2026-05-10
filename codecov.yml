@@ -17,3 +17,5 @@ coverage:
 ignore:
   # Domain は pure data only ― ロジックゼロなのでテスト不要
   - "Sources/Domain/**"
+  # DependencyInjection は wiring のみ（liveValue / testValue の一行結線）
+  - "Sources/DependencyInjection/**"
