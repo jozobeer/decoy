@@ -11,5 +11,5 @@ extension DependencyValues {
 
 private enum VirtualCameraSinkKey: DependencyKey {
     static let liveValue: any VirtualCameraSink = InMemoryVirtualCameraSink()
-    static let testValue: any VirtualCameraSink = InMemoryVirtualCameraSink()
+    static var testValue: any VirtualCameraSink { InMemoryVirtualCameraSink() }
 }
