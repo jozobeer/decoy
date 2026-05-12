@@ -317,6 +317,64 @@ struct BroadcasterPlaybackTests {
         }
     }
 
+    // MARK: - Restart after natural completion
+
+    @Test func onceMode_naturalCompletion_thenStartDecoySameMode_replaysClip() async throws {
+        // After `.once` plays its last frame, routing exits naturally
+        // (routing == nil) while state stays `.playback(.once)`. A second
+        // `startDecoy(.once)` must replay the clip, not be a no-op —
+        // otherwise users can't repeat playback without bouncing through
+        // .returnToLive.
+        let presets = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02)]
+        let store = try await Self.seededStore([Self.clip(frames: presets)])
+        let sink = InMemoryVirtualCameraSink()
+
+        try await withDependencies {
+            $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = store
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster(state: .playback(.once))
+            let first = await collectFrames(from: sink, atLeast: 2)
+            #expect(first.count == 2)
+
+            await broadcaster.handle(.startDecoy(.once))
+            let total = await collectFrames(from: sink, atLeast: 4)
+            await broadcaster.shutdown()
+
+            #expect(total.count == 4)
+            #expect(total.map { $0.data.first } == [0x01, 0x02, 0x01, 0x02])
+        }
+    }
+
+    @Test func emptyStoreAtInit_thenAddClip_andStartDecoySameMode_replays() async throws {
+        // Empty store at init → playback routing exits immediately
+        // (routing == nil). After saving a clip, a fresh
+        // `startDecoy(sameMode)` must pick it up instead of being a
+        // no-op against the stale state.
+        let store = InMemoryClipStore()
+        let sink = InMemoryVirtualCameraSink()
+
+        try await withDependencies {
+            $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = store
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster(state: .playback(.once))
+            let initial = await collectFrames(from: sink, atLeast: 0)
+            #expect(initial.isEmpty)
+
+            try await store.save(Self.clip(frames: [Self.frame(0.0, 0xAA), Self.frame(0.1, 0xBB)]))
+            await broadcaster.handle(.startDecoy(.once))
+            let after = await collectFrames(from: sink, atLeast: 2)
+            await broadcaster.shutdown()
+
+            #expect(after.map { $0.data.first } == [0xAA, 0xBB])
+        }
+    }
+
     @Test func shutdown_duringLoopPlayback_stopsFurtherEmissions() async throws {
         let presets = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02)]
         let store = try await Self.seededStore([Self.clip(frames: presets)])

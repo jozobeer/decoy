@@ -39,12 +39,19 @@ public actor Broadcaster {
         switch command {
         case .startDecoy(let mode):
             let target = OutputMode.playback(mode)
-            guard target != state else { return }
+            // Same-mode + routing still alive is a true no-op. But if
+            // routing has wound down (.once finished naturally, store
+            // was empty at init, etc.) we must restart so callers can
+            // replay without bouncing through .returnToLive.
+            if target == state, routing != nil { return }
             state = target
             await stopRouting()
             startRouting()
         case .returnToLive:
-            guard state != .live else { return }
+            // Symmetric to startDecoy: only no-op when live routing is
+            // actually running. A dead live task (source closed
+            // naturally) should be restartable.
+            if state == .live, routing != nil { return }
             state = .live
             await stopRouting()
             startRouting()
