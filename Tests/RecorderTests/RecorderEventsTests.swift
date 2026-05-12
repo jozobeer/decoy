@@ -31,7 +31,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -57,7 +57,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -82,7 +82,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 2) {
+            let events = await collectEvents(from: recorder, upTo: 2) {
                 await withDependencies {
                     $0.cameraSource = source1
                 } operation: {
@@ -120,7 +120,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -145,7 +145,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -169,7 +169,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            _ = await collectEvents(from: recorder, count: 1) {
+            _ = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -188,7 +188,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 2) {
+            let events = await collectEvents(from: recorder, upTo: 2) {
                 await withDependencies {
                     $0.cameraSource = firstSource
                     $0.clipStore = failingStore
@@ -230,7 +230,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
+            let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -255,7 +255,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
+            let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(foreign)
             }
             #expect(events.isEmpty)
@@ -273,7 +273,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
+            let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(.stopRecording)
             }
             #expect(events.isEmpty)
@@ -291,7 +291,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -311,7 +311,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEvents(from: recorder, count: 1) {
+            let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
                 await recorder.handle(.stopRecording)
@@ -427,39 +427,21 @@ struct RecorderEventsTests {
 
 extension RecorderEventsTests {
 
-    /// Collect a deterministic number of events while running an action.
-    /// Subscribes BEFORE running the action so all events are observed.
-    /// Bounded with a hang-guard (5s) so a regression that drops an expected
-    /// event surfaces as a test failure rather than a CI-timeout-level hang.
+    /// Collect events emitted while running an action. Subscribes BEFORE the
+    /// action so all events are observed. Cancels the collector immediately
+    /// after the action returns — by then the actor has processed all queued
+    /// commands (e.g. `stopRecording` awaits `consumption?.value`) and any
+    /// events have already been broadcast. The caller asserts on the
+    /// returned array's count, so a regression that drops an expected event
+    /// surfaces as an assertion failure rather than a wall-clock hang.
     fileprivate func collectEvents(
         from recorder: Recorder,
-        count: Int,
-        while action: @Sendable () async -> Void
-    ) async -> [Recorder.Event] {
-        let stream = await recorder.events
-        let collector = Task<[Recorder.Event], Never> { await take(stream, count: count) }
-        let hangGuard = Task<Void, Never> {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            collector.cancel()
-        }
-        await action()
-        let result = await collector.value
-        hangGuard.cancel()
-        return result
-    }
-
-    /// Collect events that occur during an action, used for negative assertions
-    /// ("no event should fire"). Cancels the collector immediately after the
-    /// action returns — by then the actor has processed all queued messages
-    /// and any events have already been broadcast (or not).
-    fileprivate func collectEventsWithTimeout(
-        from recorder: Recorder,
-        expecting: Int,
+        upTo count: Int,
         while action: @Sendable () async -> Void
     ) async -> [Recorder.Event] {
         let stream = await recorder.events
         let collector = Task<[Recorder.Event], Never> {
-            await take(stream, count: max(expecting, 1))
+            await take(stream, count: max(count, 1))
         }
         await action()
         collector.cancel()
