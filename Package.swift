@@ -29,7 +29,14 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
-        .target(name: "Broadcaster", dependencies: ["Domain"]),
+        .target(
+            name: "Broadcaster",
+            dependencies: [
+                "Domain",
+                "DependencyInjection",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .target(name: "InMemoryClipStore", dependencies: ["Domain"]),
         .target(name: "InMemoryVirtualCameraSink", dependencies: ["Domain"]),
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
@@ -54,7 +61,17 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
-        .testTarget(name: "BroadcasterTests", dependencies: ["Broadcaster", "Domain"]),
+        .testTarget(
+            name: "BroadcasterTests",
+            dependencies: [
+                "Broadcaster",
+                "Domain",
+                "DependencyInjection",
+                "InMemoryCameraSource",
+                "InMemoryVirtualCameraSink",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),
         .testTarget(name: "InMemoryVirtualCameraSinkTests", dependencies: ["InMemoryVirtualCameraSink", "Domain"]),
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
