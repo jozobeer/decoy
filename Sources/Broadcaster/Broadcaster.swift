@@ -173,14 +173,27 @@ extension Broadcaster {
                 mode: mode
             ) else { return }
 
-            let gap = max(
-                abs(frames[next].presentationTime - frames[index].presentationTime),
-                minimumFrameGap
-            )
+            let gap = gapBetween(current: index, next: next, frames: frames, mode: mode)
             try? await clock.sleep(for: .seconds(gap))
             if Task.isCancelled { return }
             index = next
         }
+    }
+
+    /// Inter-frame sleep duration. Normally the absolute pts difference,
+    /// floored at `minimumFrameGap`. `.loop` wrap (last → first) snaps
+    /// to `minimumFrameGap` so the cycle boundary doesn't stall for the
+    /// full clip duration — otherwise the loop period would be roughly
+    /// `2 * duration` instead of `duration`.
+    static func gapBetween(
+        current: Int,
+        next: Int,
+        frames: [Frame],
+        mode: PlaybackMode
+    ) -> Double {
+        if case .loop = mode, next < current { return minimumFrameGap }
+        let delta = abs(frames[next].presentationTime - frames[current].presentationTime)
+        return max(delta, minimumFrameGap)
     }
 
     /// Compute the next frame index for the active playback mode.

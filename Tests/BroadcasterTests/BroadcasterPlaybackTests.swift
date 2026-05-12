@@ -193,6 +193,52 @@ struct BroadcasterPlaybackTests {
         }
     }
 
+    // MARK: - Inter-frame gap (loop wrap-around)
+
+    @Test func gapBetween_loopWrap_snapsToMinimumGap() async {
+        // Loop wrap (last → first): using abs(pts delta) would yield
+        // ~duration and stall the cycle boundary. Verify the wrap
+        // returns the minimum gap instead so loop period stays ~duration,
+        // not 2 × duration.
+        let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
+        let gap = Broadcaster.gapBetween(current: 2, next: 0, frames: frames, mode: .loop)
+
+        #expect(gap == 0.001)
+    }
+
+    @Test func gapBetween_loopForward_usesPtsDelta() async {
+        let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
+        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
+
+        // (0.1 - 0.0) within float tolerance
+        #expect(abs(gap - 0.1) < 1e-9)
+    }
+
+    @Test func gapBetween_onceForward_usesPtsDelta() async {
+        let frames = [Self.frame(0.0, 0x01), Self.frame(0.5, 0x02)]
+        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .once)
+
+        #expect(abs(gap - 0.5) < 1e-9)
+    }
+
+    @Test func gapBetween_pingPongReverse_usesPtsDelta() async {
+        // PingPong reverse step (2 → 1) is still a physical-neighbour
+        // transition — gap should be the pts delta, NOT minimumFrameGap.
+        let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
+        let gap = Broadcaster.gapBetween(current: 2, next: 1, frames: frames, mode: .pingPong)
+
+        #expect(abs(gap - 0.1) < 1e-9)
+    }
+
+    @Test func gapBetween_zeroDelta_flooredToMinimum() async {
+        // Identical pts (degenerate clip) must not return 0 — that would
+        // hot-spin the routing task.
+        let frames = [Self.frame(0.0, 0x01), Self.frame(0.0, 0x02)]
+        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
+
+        #expect(gap == 0.001)
+    }
+
     // MARK: - State Transitions
 
     @Test func liveToPlayback_cancelsLiveRoutingAndStartsPlayback() async throws {
