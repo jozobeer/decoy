@@ -7,7 +7,7 @@ import Domain
 public actor Recorder {
     public enum Event: Sendable {
         case saved(Clip)
-        case saveFailed(any Error)
+        case saveFailed(any Error & Sendable)
     }
 
     @Dependency(\.cameraSource) private var cameraSource
