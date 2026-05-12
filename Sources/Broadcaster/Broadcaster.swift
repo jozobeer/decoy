@@ -18,6 +18,11 @@ public actor Broadcaster {
     public private(set) var state: OutputMode
     private var routing: Task<Void, Never>?
     private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    /// Sticky flag: once `shutdown()` runs, any subsequent
+    /// `startRouting()` is a no-op. Defends the deferred init-task hop
+    /// against a caller that does `Broadcaster() → await shutdown()`
+    /// before the actor has processed the init's `startRouting()` hop.
+    private var terminated = false
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Broadcaster")
     private static let subscriberBufferLimit = 64
@@ -43,6 +48,7 @@ public actor Broadcaster {
     }
 
     public func handle(_ command: AppCommand) async {
+        if terminated { return }
         switch command {
         case .startDecoy(let mode):
             let target = OutputMode.playback(mode)
@@ -68,6 +74,7 @@ public actor Broadcaster {
     }
 
     public func shutdown() async {
+        terminated = true
         await stopRouting()
     }
 
@@ -100,7 +107,7 @@ extension Broadcaster {
     private static let minimumFrameGap: Double = 0.001
 
     private func startRouting() {
-        guard routing == nil else { return }
+        guard !terminated, routing == nil else { return }
         let emit: @Sendable (Event) async -> Void = { [weak self] event in
             await self?.broadcast(event)
         }

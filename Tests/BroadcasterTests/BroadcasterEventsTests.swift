@@ -305,6 +305,55 @@ struct BroadcasterEventsTests {
         }
     }
 
+    @Test func shutdownBeforeInitialRouting_emitsNoEvents() async throws {
+        // init defers `startRouting()` via a `Task { await self?... }`
+        // hop so the emit closure can capture fully-initialized self.
+        // A caller that does `Broadcaster() → await shutdown()` rapidly
+        // can race the deferred hop — without a sticky `terminated`
+        // flag, `stopRouting()` would see `routing == nil`, return, and
+        // then the deferred task could still start routing afterward.
+        // Verify the shutdown contract: after `shutdown()` completes,
+        // no events emit regardless of init-task ordering.
+        let sink = FailingVirtualCameraSink(error: TestError(label: "race"))
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = InMemoryClipStore()
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster()
+            await broadcaster.shutdown()
+            let events = await collectEvents(from: broadcaster, atLeast: 0)
+            #expect(events.isEmpty)
+        }
+    }
+
+    @Test func handleAfterShutdown_doesNotRestartRouting() async throws {
+        // Once shutdown has run, `handle(.startDecoy)` / `.returnToLive`
+        // must be a no-op — otherwise callers could resurrect routing
+        // after intentional shutdown.
+        let presets = [Self.frame(0.0, 0x01)]
+        let store = try await Self.seededStore([Self.clip(frames: presets)])
+        let sink = FailingVirtualCameraSink(error: TestError(label: "post-shutdown"))
+
+        try await withDependencies {
+            $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = store
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster()
+            await broadcaster.shutdown()
+            let events = await collectEvents(from: broadcaster, atLeast: 0) {
+                await broadcaster.handle(.startDecoy(.loop))
+                await broadcaster.handle(.returnToLive)
+            }
+            #expect(events.isEmpty)
+        }
+    }
+
     @Test func playbackMode_storeThrowsCancellationError_emitsNoStoreReadFailed() async throws {
         // CancellationError on store.all() during playback init must be
         // suppressed — same rationale as sink cancellation.
