@@ -1,10 +1,14 @@
 import Foundation
-import OSLog
 import Dependencies
 import DependencyInjection
 import Domain
 
 public actor Recorder {
+    public enum Event: Sendable {
+        case saved(Clip)
+        case saveFailed(any Error)
+    }
+
     @Dependency(\.cameraSource) private var cameraSource
     @Dependency(\.clipStore) private var clipStore
     @Dependency(\.date) private var date
@@ -14,8 +18,7 @@ public actor Recorder {
     private var consumption: Task<Void, Never>?
     private var buffer: [Frame] = []
     private var recordedAt: Date?
-
-    private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Recorder")
+    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
 
     public init() {}
 
@@ -28,6 +31,16 @@ public actor Recorder {
         case .startDecoy, .returnToLive:
             break
         }
+    }
+
+    public var events: AsyncStream<Event> {
+        let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
+        let id = UUID()
+        subscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeSubscriber(id: id) }
+        }
+        return stream
     }
 }
 
@@ -73,9 +86,17 @@ extension Recorder {
         )
         do {
             try await clipStore.save(clip)
+            broadcast(.saved(clip))
         } catch {
-            // TODO(#14): surface save failures via Event stream — logging is a stopgap
-            Self.logger.error("ClipStore.save failed: \(error.localizedDescription, privacy: .public)")
+            broadcast(.saveFailed(error))
         }
+    }
+
+    private func broadcast(_ event: Event) {
+        subscribers.values.forEach { $0.yield(event) }
+    }
+
+    private func removeSubscriber(id: UUID) {
+        subscribers.removeValue(forKey: id)
     }
 }
