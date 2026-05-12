@@ -19,6 +19,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.12.0"),
         .package(url: "https://github.com/pointfreeco/swift-clocks", from: "1.0.0"),
+        .package(url: "https://github.com/pointfreeco/swift-concurrency-extras", from: "1.0.0"),
     ],
     targets: [
         .target(name: "Domain"),
@@ -73,6 +74,7 @@ let package = Package(
                 "InMemoryVirtualCameraSink",
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "Clocks", package: "swift-clocks"),
+                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
             ]
         ),
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),

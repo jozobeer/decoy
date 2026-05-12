@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import Clocks
+import ConcurrencyExtras
 import Dependencies
 import DependencyInjection
 import Domain
@@ -242,15 +243,25 @@ struct BroadcasterPlaybackTests {
             #expect(beforeReturn.count >= 3)
 
             await broadcaster.handle(.returnToLive)
+            // Wait until live routing has subscribed to liveSource —
+            // otherwise the upcoming `append(0xBB)` would yield to zero
+            // continuations and the marker would never reach the sink.
+            for _ in 0..<200 {
+                if await liveSource.subscribeCount > 0 { break }
+                await Task.megaYield()
+            }
             // Append a fresh live frame so we can prove live is routing.
             await liveSource.append([Self.frame(1.0, 0xBB)])
 
-            // Collect until we see the live marker.
+            // Collect until we see the live marker. `megaYield` matches
+            // `ImmediateClock.sleep`'s internal scheduling — the playback
+            // cancellation drain plus live resubscribe ride on
+            // background-priority detached tasks.
             var settled: [Frame] = []
-            for _ in 0..<100 {
+            for _ in 0..<200 {
                 settled = await sink.frames
                 if settled.contains(where: { $0.data.first == 0xBB }) { break }
-                await Task.yield()
+                await Task.megaYield()
             }
             await broadcaster.shutdown()
 
@@ -309,9 +320,11 @@ struct BroadcasterPlaybackTests {
 extension BroadcasterPlaybackTests {
 
     /// Poll the sink until at least `count` frames arrive (or `maxPolls`
-    /// yields elapse), then take a few extra yields so surplus arrivals
-    /// surface in assertions. Mirrors the helper in
-    /// `BroadcasterIntegrationTests`.
+    /// elapse), then take an extra megaYield so surplus arrivals surface in
+    /// assertions. `Task.megaYield()` matches `ImmediateClock.sleep`'s
+    /// internal scheduling mechanism (20 background-priority detached
+    /// `Task.yield()` calls) — without it, frame-emission tasks scheduled
+    /// at background priority don't get a chance to run between polls.
     private func collectFrames(
         from sink: InMemoryVirtualCameraSink,
         atLeast count: Int
@@ -320,9 +333,9 @@ extension BroadcasterPlaybackTests {
         for _ in 0..<maxPolls {
             let current = await sink.frames
             if current.count >= count { break }
-            await Task.yield()
+            await Task.megaYield()
         }
-        for _ in 0..<4 { await Task.yield() }
+        await Task.megaYield()
         return await sink.frames
     }
 }
