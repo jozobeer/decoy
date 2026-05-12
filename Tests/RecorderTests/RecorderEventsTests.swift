@@ -7,7 +7,7 @@ import InMemoryCameraSource
 import InMemoryClipStore
 @testable import Recorder
 
-@Suite("RecorderEvents")
+@Suite("RecorderEvents", .timeLimit(.minutes(1)))
 struct RecorderEventsTests {
 
     // MARK: - Fixtures
@@ -334,8 +334,8 @@ struct RecorderEventsTests {
         } operation: {
             let recorder = Recorder()
 
-            let firstStream = await recorder.events
-            let secondStream = await recorder.events
+            let firstStream = await recorder.subscribeEvents()
+            let secondStream = await recorder.subscribeEvents()
 
             async let firstEvents: [Recorder.Event] = take(firstStream, count: 1)
             async let secondEvents: [Recorder.Event] = take(secondStream, count: 1)
@@ -371,7 +371,7 @@ struct RecorderEventsTests {
             await recorder.handle(.startRecording)
 
             // subscribe AFTER start but BEFORE stop
-            let stream = await recorder.events
+            let stream = await recorder.subscribeEvents()
             async let events: [Recorder.Event] = take(stream, count: 1)
 
             await recorder.handle(.stopRecording)
@@ -397,8 +397,8 @@ struct RecorderEventsTests {
         } operation: {
             let recorder = Recorder()
 
-            let persistentStream = await recorder.events
-            let cancelledStream = await recorder.events
+            let persistentStream = await recorder.subscribeEvents()
+            let cancelledStream = await recorder.subscribeEvents()
 
             // Persistent subscriber that will observe the event.
             async let persistentEvents: [Recorder.Event] = take(persistentStream, count: 1)
@@ -439,12 +439,12 @@ extension RecorderEventsTests {
     /// `upTo count == 0` (negative assertion): the take loop has no natural
     /// stop, so we yield once to give the consumer a scheduling slot for
     /// any unexpected event, then cancel to unblock.
-    fileprivate func collectEvents(
+    private func collectEvents(
         from recorder: Recorder,
         upTo count: Int,
         while action: @Sendable () async -> Void
     ) async -> [Recorder.Event] {
-        let stream = await recorder.events
+        let stream = await recorder.subscribeEvents()
         let collector = Task<[Recorder.Event], Never> {
             await take(stream, count: max(count, 1))
         }
@@ -455,7 +455,7 @@ extension RecorderEventsTests {
         return await collector.value
     }
 
-    fileprivate func take(_ stream: AsyncStream<Recorder.Event>, count: Int) async -> [Recorder.Event] {
+    private func take(_ stream: AsyncStream<Recorder.Event>, count: Int) async -> [Recorder.Event] {
         var collected: [Recorder.Event] = []
         for await event in stream {
             collected.append(event)
@@ -467,13 +467,15 @@ extension RecorderEventsTests {
 
 // MARK: - Test Doubles
 
-private actor FailingClipStore: ClipStore {
+private actor FailingClipStore {
     private let saveError: any Error & Sendable
 
     init(onSave error: any Error & Sendable) {
         self.saveError = error
     }
+}
 
+extension FailingClipStore: ClipStore {
     func save(_ clip: Clip) async throws {
         throw saveError
     }

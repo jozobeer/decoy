@@ -37,7 +37,7 @@ public actor Recorder {
         }
     }
 
-    public var events: AsyncStream<Event> {
+    public func subscribeEvents() -> AsyncStream<Event> {
         let (stream, continuation) = AsyncStream.makeStream(
             of: Event.self,
             bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
