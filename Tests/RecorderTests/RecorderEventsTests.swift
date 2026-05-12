@@ -431,16 +431,18 @@ extension RecorderEventsTests {
     /// drain budget.
     ///
     /// After `action()` returns we cooperatively yield `count + 2` times
-    /// (minimum 4) to give the consumer task scheduling slots to drain the
-    /// buffered events. Each `for-await` iteration is a single suspension
-    /// point, so one yield delivers one event. The `+2` headroom catches
-    /// up to two surplus events beyond `count` — enough to break a "emits
-    /// exactly N" assertion if the recorder regresses to a duplicate or
-    /// off-by-one. If a regression emits more than `count + 2` events the
-    /// surplus stays in the buffer and the assertion still passes; this
-    /// trade-off is accepted because asserting more than a couple extras
-    /// is unusual and unbounded draining would require an extra
-    /// synchronisation primitive between actor and consumer.
+    /// (minimum 4) to give the collector task chances to run and drain
+    /// buffered events. `Task.yield()` only offers the scheduler an
+    /// opportunity to run other tasks; a single `for-await` resumption can
+    /// consume multiple buffered events without re-suspending, so the
+    /// relationship between yields and drained events is best-effort
+    /// rather than 1:1. The `+2` headroom is empirically sufficient to
+    /// surface duplicate or off-by-one regressions in the test
+    /// environment (single actor, one collector task, no contending
+    /// fixtures). If a regression emits substantially more than the
+    /// budget the surplus stays in the buffer and the assertion still
+    /// passes; unbounded draining would require an extra synchronisation
+    /// primitive between actor and consumer.
     private func collectEvents(
         from recorder: Recorder,
         upTo count: Int,
