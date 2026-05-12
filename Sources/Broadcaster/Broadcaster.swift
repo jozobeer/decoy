@@ -191,7 +191,10 @@ extension Broadcaster {
                 if Task.isCancelled { break }
                 do {
                     try await sink.send(frame)
+                } catch is CancellationError {
+                    break
                 } catch {
+                    if Task.isCancelled { break }
                     await emit(.sendFailed(error))
                 }
             }
@@ -209,7 +212,10 @@ extension Broadcaster {
             let clip: Clip?
             do {
                 clip = try await latestClip(in: store)
+            } catch is CancellationError {
+                return
             } catch {
+                if Task.isCancelled { return }
                 await emit(.storeReadFailed(error))
                 return
             }
@@ -237,7 +243,10 @@ extension Broadcaster {
         while !Task.isCancelled {
             do {
                 try await sink.send(frames[index])
+            } catch is CancellationError {
+                return
             } catch {
+                if Task.isCancelled { return }
                 await emit(.sendFailed(error))
             }
 

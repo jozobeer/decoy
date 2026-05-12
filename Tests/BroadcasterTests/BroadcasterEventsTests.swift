@@ -262,6 +262,69 @@ struct BroadcasterEventsTests {
         }
     }
 
+    // MARK: - Cancellation suppression
+
+    @Test func liveMode_sinkThrowsCancellationError_emitsNoSendFailed() async throws {
+        // sink.send may throw CancellationError when the routing task is
+        // cancelled mid-flight (shutdown / state transition). This is
+        // not a real failure — surfacing it as .sendFailed would be
+        // noise. Verify suppression.
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0, 0xAA)])
+        let sink = FailingVirtualCameraSink(error: CancellationError())
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = InMemoryClipStore()
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster()
+            let events = await collectEvents(from: broadcaster, atLeast: 0)
+            await broadcaster.shutdown()
+
+            #expect(events.isEmpty)
+        }
+    }
+
+    @Test func playbackMode_sinkThrowsCancellationError_emitsNoSendFailed() async throws {
+        let presets = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02)]
+        let store = try await Self.seededStore([Self.clip(frames: presets)])
+        let sink = FailingVirtualCameraSink(error: CancellationError())
+
+        try await withDependencies {
+            $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = store
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster(state: .playback(.once))
+            let events = await collectEvents(from: broadcaster, atLeast: 0)
+            await broadcaster.shutdown()
+
+            #expect(events.isEmpty)
+        }
+    }
+
+    @Test func playbackMode_storeThrowsCancellationError_emitsNoStoreReadFailed() async throws {
+        // CancellationError on store.all() during playback init must be
+        // suppressed — same rationale as sink cancellation.
+        let store = FailingClipStore(onAll: CancellationError())
+        let sink = InMemoryVirtualCameraSink()
+
+        try await withDependencies {
+            $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = store
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster(state: .playback(.once))
+            let events = await collectEvents(from: broadcaster, atLeast: 0)
+            await broadcaster.shutdown()
+
+            #expect(events.isEmpty)
+        }
+    }
+
     // MARK: - No-event scenarios
 
     @Test func liveMode_withSuccessfulSink_emitsNoEvents() async throws {
@@ -500,42 +563,34 @@ struct BroadcasterEventsTests {
 extension BroadcasterEventsTests {
 
     /// Subscribe and collect events emitted during the broadcaster's
-    /// operation, up to a budget. Uses megaYield-based draining to match
-    /// `ImmediateClock.sleep`'s internal scheduling (see
-    /// `BroadcasterPlaybackTests.collectFrames` for rationale).
+    /// operation. Polls until `count` events are observed or the budget
+    /// is exhausted. For `atLeast: 0` (negative-assertion tests) we still
+    /// burn a small settle window so the routing task has a chance to
+    /// emit anything it would emit. megaYield matches `ImmediateClock`'s
+    /// internal scheduling — see `BroadcasterPlaybackTests.collectFrames`
+    /// for rationale.
     private func collectEvents(
         from broadcaster: Broadcaster,
         atLeast count: Int,
         while action: (@Sendable () async -> Void)? = nil
     ) async -> [Broadcaster.Event] {
         let stream = await broadcaster.subscribeEvents()
-        let collector = Task<[Broadcaster.Event], Never> {
-            await drain(stream)
+        let buffer = EventBuffer()
+        let collector = Task<Void, Never> {
+            for await event in stream {
+                await buffer.append(event)
+            }
         }
         if let action { await action() }
-        for _ in 0..<200 {
-            // best-effort polling: peek by cancelling the collector and
-            // checking its value would race with appends, so we just
-            // burn yields until either count or budget exhausted.
+        let minSettle = 5
+        let maxBudget = 200
+        for iteration in 0..<maxBudget {
             await Task.megaYield()
-            // can't peek mid-stream; loop guard uses time only.
-            // Break early when enough events captured via separate path
-            // would require shared state; instead we trust the budget.
-            // For atLeast: 0 we just settle and bail.
-            if count == 0 { break }
+            if iteration >= minSettle, await buffer.count >= count { break }
         }
-        // Extra settle window
         await Task.megaYield()
         collector.cancel()
-        return await collector.value
-    }
-
-    private func drain(_ stream: AsyncStream<Broadcaster.Event>) async -> [Broadcaster.Event] {
-        var collected: [Broadcaster.Event] = []
-        for await event in stream {
-            collected.append(event)
-        }
-        return collected
+        return await buffer.snapshot
     }
 
     private func take(_ stream: AsyncStream<Broadcaster.Event>, count: Int) async -> [Broadcaster.Event] {
@@ -552,6 +607,20 @@ extension BroadcasterEventsTests {
 
 private struct TestError: Error, Equatable, Sendable {
     let label: String
+}
+
+/// Shared event sink for `collectEvents`. Lives on its own actor so the
+/// polling loop can peek at the captured count without racing the
+/// collector's append path.
+private actor EventBuffer {
+    private var events: [Broadcaster.Event] = []
+
+    func append(_ event: Broadcaster.Event) {
+        events.append(event)
+    }
+
+    var count: Int { events.count }
+    var snapshot: [Broadcaster.Event] { events }
 }
 
 /// VirtualCameraSink that always throws the given error on send.
