@@ -11,5 +11,10 @@ extension DependencyValues {
 
 private enum ClipStoreKey: DependencyKey {
     static let liveValue: any ClipStore = InMemoryClipStore()
-    static var testValue: any ClipStore { InMemoryClipStore() }
+    static var testValue: any ClipStore {
+        unimplemented(
+            #"@Dependency(\.clipStore)"#,
+            placeholder: InMemoryClipStore() as any ClipStore
+        )
+    }
 }

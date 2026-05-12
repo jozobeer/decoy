@@ -11,5 +11,10 @@ extension DependencyValues {
 
 private enum CameraSourceKey: DependencyKey {
     static let liveValue: any CameraSource = InMemoryCameraSource()
-    static var testValue: any CameraSource { InMemoryCameraSource() }
+    static var testValue: any CameraSource {
+        unimplemented(
+            #"@Dependency(\.cameraSource)"#,
+            placeholder: InMemoryCameraSource() as any CameraSource
+        )
+    }
 }
