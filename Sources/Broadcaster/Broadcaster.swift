@@ -1,8 +1,15 @@
+import Foundation
+import OSLog
 import Dependencies
 import DependencyInjection
 import Domain
 
 public actor Broadcaster {
+    public enum Event: Sendable {
+        case sendFailed(any Error & Sendable)
+        case storeReadFailed(any Error & Sendable)
+    }
+
     private nonisolated let cameraSource: any CameraSource
     private nonisolated let virtualCameraSink: any VirtualCameraSink
     private nonisolated let clipStore: any ClipStore
@@ -10,6 +17,15 @@ public actor Broadcaster {
 
     public private(set) var state: OutputMode
     private var routing: Task<Void, Never>?
+    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    /// Sticky flag: once `shutdown()` runs, any subsequent
+    /// `startRouting()` is a no-op. Defends the deferred init-task hop
+    /// against a caller that does `Broadcaster() → await shutdown()`
+    /// before the actor has processed the init's `startRouting()` hop.
+    private var terminated = false
+
+    private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Broadcaster")
+    private static let subscriberBufferLimit = 64
 
     public init(state: OutputMode = .live) {
         @Dependency(\.cameraSource) var cameraSource
@@ -21,21 +37,18 @@ public actor Broadcaster {
         self.clipStore = clipStore
         self.clock = clock
         self.state = state
-        let task = Self.makeRoutingTask(
-            state: state,
-            source: cameraSource,
-            store: clipStore,
-            sink: virtualCameraSink,
-            clock: clock
-        )
-        self.routing = task
+        // Initial routing is started via a hop back into the actor so
+        // we can build an `emit` closure that captures fully-initialized
+        // self. Doing it in init's body would force the closure to
+        // capture self before stored properties are set, which Swift's
+        // actor isolation rules reject.
         Task { [weak self] in
-            _ = await task.value
-            await self?.routingDidComplete(task)
+            await self?.startRouting()
         }
     }
 
     public func handle(_ command: AppCommand) async {
+        if terminated { return }
         switch command {
         case .startDecoy(let mode):
             let target = OutputMode.playback(mode)
@@ -61,7 +74,28 @@ public actor Broadcaster {
     }
 
     public func shutdown() async {
+        terminated = true
         await stopRouting()
+    }
+
+    /// Returns a fresh broadcast stream. Cleanup mirrors `Recorder` —
+    /// `onTermination` removes the subscriber on consumer cancel, and
+    /// `broadcast` does lazy cleanup of `.terminated` continuations on
+    /// the next event. Known gap (same as Recorder): consumers that
+    /// abandon the stream without cancellation leave stale entries
+    /// until the next broadcast catches `.terminated`. Tracked in #17
+    /// for a Subscription-token redesign that would cover both actors.
+    public func subscribeEvents() -> AsyncStream<Event> {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: Event.self,
+            bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
+        )
+        let id = UUID()
+        subscribers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeSubscriber(id: id) }
+        }
+        return stream
     }
 }
 
@@ -73,13 +107,17 @@ extension Broadcaster {
     private static let minimumFrameGap: Double = 0.001
 
     private func startRouting() {
-        guard routing == nil else { return }
+        guard !terminated, routing == nil else { return }
+        let emit: @Sendable (Event) async -> Void = { [weak self] event in
+            await self?.broadcast(event)
+        }
         let task = Self.makeRoutingTask(
             state: state,
             source: cameraSource,
             store: clipStore,
             sink: virtualCameraSink,
-            clock: clock
+            clock: clock,
+            emit: emit
         )
         routing = task
         Task { [weak self] in
@@ -112,30 +150,60 @@ extension Broadcaster {
         }
     }
 
+    /// Fan out an event to all live subscribers. `.terminated`
+    /// continuations are dropped from the map lazily on the next emit.
+    private func broadcast(_ event: Event) {
+        let snapshot = subscribers
+        let terminated = snapshot.compactMap { id, continuation -> UUID? in
+            switch continuation.yield(event) {
+            case .enqueued: return nil
+            case .dropped:
+                Self.logger.warning("Broadcaster event dropped for subscriber \(id.uuidString, privacy: .public) (buffer full)")
+                return nil
+            case .terminated: return id
+            @unknown default: return nil
+            }
+        }
+        terminated.forEach { subscribers.removeValue(forKey: $0) }
+    }
+
+    private func removeSubscriber(id: UUID) {
+        subscribers.removeValue(forKey: id)
+    }
+
     private static func makeRoutingTask(
         state: OutputMode,
         source: any CameraSource,
         store: any ClipStore,
         sink: any VirtualCameraSink,
-        clock: any Clock<Duration>
+        clock: any Clock<Duration>,
+        emit: @escaping @Sendable (Event) async -> Void
     ) -> Task<Void, Never> {
         switch state {
         case .live:
-            return makeLiveRoutingTask(source: source, sink: sink)
+            return makeLiveRoutingTask(source: source, sink: sink, emit: emit)
         case .playback(let mode):
-            return makePlaybackRoutingTask(mode: mode, store: store, sink: sink, clock: clock)
+            return makePlaybackRoutingTask(mode: mode, store: store, sink: sink, clock: clock, emit: emit)
         }
     }
 
     private static func makeLiveRoutingTask(
         source: any CameraSource,
-        sink: any VirtualCameraSink
+        sink: any VirtualCameraSink,
+        emit: @escaping @Sendable (Event) async -> Void
     ) -> Task<Void, Never> {
         Task {
             let stream = await source.frames()
             for await frame in stream {
                 if Task.isCancelled { break }
-                try? await sink.send(frame)
+                do {
+                    try await sink.send(frame)
+                } catch is CancellationError {
+                    break
+                } catch {
+                    if Task.isCancelled { break }
+                    await emit(.sendFailed(error))
+                }
             }
         }
     }
@@ -144,14 +212,22 @@ extension Broadcaster {
         mode: PlaybackMode,
         store: any ClipStore,
         sink: any VirtualCameraSink,
-        clock: any Clock<Duration>
+        clock: any Clock<Duration>,
+        emit: @escaping @Sendable (Event) async -> Void
     ) -> Task<Void, Never> {
         Task {
-            guard
-                let clip = try? await latestClip(in: store),
-                !clip.frames.isEmpty
-            else { return }
-            await emit(frames: clip.frames, mode: mode, sink: sink, clock: clock)
+            let clip: Clip?
+            do {
+                clip = try await latestClip(in: store)
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                await emit(.storeReadFailed(error))
+                return
+            }
+            guard let clip, !clip.frames.isEmpty else { return }
+            await emitFrames(clip.frames, mode: mode, sink: sink, clock: clock, emit: emit)
         }
     }
 
@@ -161,17 +237,25 @@ extension Broadcaster {
         try await store.all().max(by: { $0.recordedAt < $1.recordedAt })
     }
 
-    private static func emit(
-        frames: [Frame],
+    private static func emitFrames(
+        _ frames: [Frame],
         mode: PlaybackMode,
         sink: any VirtualCameraSink,
-        clock: any Clock<Duration>
+        clock: any Clock<Duration>,
+        emit: @escaping @Sendable (Event) async -> Void
     ) async {
         var index = 0
         var direction = 1
 
         while !Task.isCancelled {
-            try? await sink.send(frames[index])
+            do {
+                try await sink.send(frames[index])
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                await emit(.sendFailed(error))
+            }
 
             guard let next = nextIndex(
                 current: index,
@@ -241,3 +325,4 @@ extension Broadcaster {
         return current + direction
     }
 }
+
