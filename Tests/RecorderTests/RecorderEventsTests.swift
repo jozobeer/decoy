@@ -427,18 +427,20 @@ struct RecorderEventsTests {
 
 extension RecorderEventsTests {
 
-    /// Collect events emitted while running an action. Subscribes BEFORE the
-    /// action so all events are observed.
+    /// Collect every event emitted while running an action. Subscribes
+    /// BEFORE the action so all events are observed.
     ///
-    /// `upTo count > 0` (positive assertion): `take(_:count:)` naturally
-    /// breaks at `count`. We don't cancel — that would race against the
-    /// consumer task reading values that `broadcast` just enqueued.
-    /// A regression that drops an expected event surfaces as a CI-level
-    /// timeout, not a false pass.
+    /// Returns *all* events the actor broadcast during `action()`, not just
+    /// the first `count`. This lets callers assert exact counts — if the
+    /// recorder regresses to emit a duplicate after the expected event,
+    /// it shows up in the returned array and breaks the assertion.
     ///
-    /// `upTo count == 0` (negative assertion): the take loop has no natural
-    /// stop, so we yield once to give the consumer a scheduling slot for
-    /// any unexpected event, then cancel to unblock.
+    /// `count` only sizes the drain budget: after `action()` returns we
+    /// yield `count + 2` times to give the consumer enough scheduling
+    /// slots to read every buffered event (each `for-await` iteration is a
+    /// suspension point, so one yield delivers one event). The `+2`
+    /// headroom catches up to two surplus events without unbounded
+    /// waiting.
     private func collectEvents(
         from recorder: Recorder,
         upTo count: Int,
@@ -446,13 +448,21 @@ extension RecorderEventsTests {
     ) async -> [Recorder.Event] {
         let stream = await recorder.subscribeEvents()
         let collector = Task<[Recorder.Event], Never> {
-            await take(stream, count: max(count, 1))
+            await drain(stream)
         }
         await action()
-        guard count == 0 else { return await collector.value }
-        await Task.yield()
+        let drainCycles = max(count + 2, 4)
+        for _ in 0..<drainCycles { await Task.yield() }
         collector.cancel()
         return await collector.value
+    }
+
+    private func drain(_ stream: AsyncStream<Recorder.Event>) async -> [Recorder.Event] {
+        var collected: [Recorder.Event] = []
+        for await event in stream {
+            collected.append(event)
+        }
+        return collected
     }
 
     private func take(_ stream: AsyncStream<Recorder.Event>, count: Int) async -> [Recorder.Event] {

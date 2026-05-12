@@ -95,7 +95,7 @@ extension Recorder {
             try await clipStore.save(clip)
             broadcast(.saved(clip))
         } catch {
-            Self.logger.error("ClipStore.save failed: \(error.localizedDescription, privacy: .public)")
+            Self.logger.error("ClipStore.save failed: \(error.localizedDescription, privacy: .private)")
             broadcast(.saveFailed(error))
         }
     }
