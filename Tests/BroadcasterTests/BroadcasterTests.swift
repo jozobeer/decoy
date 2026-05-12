@@ -1,8 +1,10 @@
 import Testing
+import Clocks
 import Dependencies
 import DependencyInjection
 import Domain
 import InMemoryCameraSource
+import InMemoryClipStore
 import InMemoryVirtualCameraSink
 @testable import Broadcaster
 
@@ -125,15 +127,18 @@ struct BroadcasterTests {
 
 extension BroadcasterTests {
     /// State-only tests don't exercise routing semantics — they still
-    /// need `cameraSource` / `virtualCameraSink` wired because the actor
-    /// captures both in `init`. An empty `InMemoryCameraSource` finishes
-    /// its stream immediately, so no frames flow through the sink.
+    /// need every port wired because the actor captures all of them in
+    /// `init`. Empty source / store finish their streams immediately so
+    /// no frames flow through the sink; `ImmediateClock` keeps any
+    /// pacing in playback routing from blocking the test.
     fileprivate func withStubDeps<R: Sendable>(
         _ operation: @Sendable () async throws -> R
     ) async rethrows -> R {
         try await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
+            $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             try await operation()
         }
