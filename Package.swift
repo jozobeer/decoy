@@ -21,7 +21,14 @@ let package = Package(
     ],
     targets: [
         .target(name: "Domain"),
-        .target(name: "Recorder", dependencies: ["Domain"]),
+        .target(
+            name: "Recorder",
+            dependencies: [
+                "Domain",
+                "DependencyInjection",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .target(name: "Broadcaster", dependencies: ["Domain"]),
         .target(name: "InMemoryClipStore", dependencies: ["Domain"]),
         .target(name: "InMemoryVirtualCameraSink", dependencies: ["Domain"]),
@@ -36,7 +43,17 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
-        .testTarget(name: "RecorderTests", dependencies: ["Recorder", "Domain"]),
+        .testTarget(
+            name: "RecorderTests",
+            dependencies: [
+                "Recorder",
+                "Domain",
+                "DependencyInjection",
+                "InMemoryCameraSource",
+                "InMemoryClipStore",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .testTarget(name: "BroadcasterTests", dependencies: ["Broadcaster", "Domain"]),
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),
         .testTarget(name: "InMemoryVirtualCameraSinkTests", dependencies: ["InMemoryVirtualCameraSink", "Domain"]),
