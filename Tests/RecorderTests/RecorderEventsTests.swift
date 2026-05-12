@@ -427,20 +427,20 @@ struct RecorderEventsTests {
 
 extension RecorderEventsTests {
 
-    /// Collect every event emitted while running an action. Subscribes
-    /// BEFORE the action so all events are observed.
+    /// Subscribe and collect events emitted during an action, up to the
+    /// drain budget.
     ///
-    /// Returns *all* events the actor broadcast during `action()`, not just
-    /// the first `count`. This lets callers assert exact counts — if the
-    /// recorder regresses to emit a duplicate after the expected event,
-    /// it shows up in the returned array and breaks the assertion.
-    ///
-    /// `count` only sizes the drain budget: after `action()` returns we
-    /// yield `count + 2` times to give the consumer enough scheduling
-    /// slots to read every buffered event (each `for-await` iteration is a
-    /// suspension point, so one yield delivers one event). The `+2`
-    /// headroom catches up to two surplus events without unbounded
-    /// waiting.
+    /// After `action()` returns we cooperatively yield `count + 2` times
+    /// (minimum 4) to give the consumer task scheduling slots to drain the
+    /// buffered events. Each `for-await` iteration is a single suspension
+    /// point, so one yield delivers one event. The `+2` headroom catches
+    /// up to two surplus events beyond `count` — enough to break a "emits
+    /// exactly N" assertion if the recorder regresses to a duplicate or
+    /// off-by-one. If a regression emits more than `count + 2` events the
+    /// surplus stays in the buffer and the assertion still passes; this
+    /// trade-off is accepted because asserting more than a couple extras
+    /// is unusual and unbounded draining would require an extra
+    /// synchronisation primitive between actor and consumer.
     private func collectEvents(
         from recorder: Recorder,
         upTo count: Int,
