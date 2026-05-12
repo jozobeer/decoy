@@ -461,9 +461,9 @@ extension RecorderEventsTests {
 // MARK: - Test Doubles
 
 private actor FailingClipStore: ClipStore {
-    private let saveError: Error
+    private let saveError: any Error & Sendable
 
-    init(onSave error: Error) {
+    init(onSave error: any Error & Sendable) {
         self.saveError = error
     }
 
@@ -475,6 +475,6 @@ private actor FailingClipStore: ClipStore {
     func clip(id: UUID) async throws -> Clip? { nil }
 }
 
-private struct TestError: Error, Equatable {
+private struct TestError: Error, Equatable, Sendable {
     let label: String
 }
