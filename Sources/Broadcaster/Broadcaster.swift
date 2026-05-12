@@ -36,6 +36,12 @@ public actor Broadcaster {
         case .returnToLive:
             guard state != .live else { return }
             state = .live
+            // Drain any in-flight teardown first — concurrent
+            // .startDecoy may still be awaiting stopRouting(), which
+            // would leave `routing` non-nil and make startRouting()
+            // no-op. stopRouting() on a nil/finished routing is a
+            // cheap no-op, so this is safe to always call.
+            await stopRouting()
             startRouting()
         case .startRecording, .stopRecording:
             break
