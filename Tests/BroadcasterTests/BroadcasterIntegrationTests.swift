@@ -65,6 +65,10 @@ struct BroadcasterIntegrationTests {
             await broadcaster.shutdown()
 
             #expect(frames.isEmpty)
+            // Belt-and-suspenders: `atLeast: 0` exits the poll loop
+            // immediately, so without the subscribe-count check a
+            // mistakenly-started routing task might still slip through.
+            #expect(await source.subscribeCount == 0)
             #expect(await broadcaster.state == .playback(mode))
         }
     }
@@ -140,9 +144,12 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster(state: .playback(.once))
-            // No frames yet — routing not active.
+            // No frames yet — routing not active. The empty-frames
+            // check alone is weak (atLeast: 0 short-circuits the poll),
+            // so pin the precondition via subscribeCount too.
             let beforeReturn = await collectFrames(from: sink, atLeast: 0)
             #expect(beforeReturn.isEmpty)
+            #expect(await source.subscribeCount == 0)
 
             await broadcaster.handle(.returnToLive)
             let frames = await collectFrames(from: sink, atLeast: 1)

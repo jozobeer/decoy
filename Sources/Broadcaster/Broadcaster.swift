@@ -58,11 +58,18 @@ extension Broadcaster {
         }
     }
 
+    /// Cancel the active routing task and wait for it to fully wind down.
+    /// `routing` stays non-nil during the await so a concurrent
+    /// `startRouting()` (via actor re-entrancy) can't spawn a second
+    /// task while the old one is still draining. Identity-check at the
+    /// end so a stop+restart sequence doesn't clobber the new task.
     private func stopRouting() async {
-        let task = routing
-        routing = nil
-        task?.cancel()
-        await task?.value
+        guard let task = routing else { return }
+        task.cancel()
+        await task.value
+        if routing == task {
+            routing = nil
+        }
     }
 
     /// Called when a routing task finishes — naturally (source closed)
