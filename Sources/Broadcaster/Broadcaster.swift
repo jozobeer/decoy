@@ -16,7 +16,12 @@ public actor Broadcaster {
         self.virtualCameraSink = virtualCameraSink
         self.state = state
         if state == .live {
-            self.routing = Self.makeRoutingTask(source: cameraSource, sink: virtualCameraSink)
+            let task = Self.makeRoutingTask(source: cameraSource, sink: virtualCameraSink)
+            self.routing = task
+            Task { [weak self] in
+                _ = await task.value
+                await self?.routingDidComplete(task)
+            }
         }
     }
 
@@ -37,7 +42,7 @@ public actor Broadcaster {
         }
     }
 
-    public func shutdown() async throws {
+    public func shutdown() async {
         await stopRouting()
     }
 }
@@ -45,7 +50,12 @@ public actor Broadcaster {
 extension Broadcaster {
     private func startRouting() {
         guard routing == nil else { return }
-        routing = Self.makeRoutingTask(source: cameraSource, sink: virtualCameraSink)
+        let task = Self.makeRoutingTask(source: cameraSource, sink: virtualCameraSink)
+        routing = task
+        Task { [weak self] in
+            _ = await task.value
+            await self?.routingDidComplete(task)
+        }
     }
 
     private func stopRouting() async {
@@ -53,6 +63,16 @@ extension Broadcaster {
         routing = nil
         task?.cancel()
         await task?.value
+    }
+
+    /// Called when a routing task finishes — naturally (source closed)
+    /// or via cancellation. Only clears `routing` when the completing
+    /// task is the one we currently track, so a stop+restart sequence
+    /// doesn't accidentally drop the new task.
+    private func routingDidComplete(_ task: Task<Void, Never>) {
+        if routing == task {
+            routing = nil
+        }
     }
 
     private static func makeRoutingTask(

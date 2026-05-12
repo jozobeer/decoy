@@ -27,8 +27,8 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            let frames = await collectFrames(from: sink, upTo: 1)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 1)
+            await broadcaster.shutdown()
 
             #expect(frames.count == 1)
             #expect(await broadcaster.state == .live)
@@ -44,8 +44,8 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster(state: .live)
-            let frames = await collectFrames(from: sink, upTo: 1)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 1)
+            await broadcaster.shutdown()
 
             #expect(frames.count == 1)
         }
@@ -61,8 +61,8 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster(state: .playback(mode))
-            let frames = await collectFrames(from: sink, upTo: 0)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 0)
+            await broadcaster.shutdown()
 
             #expect(frames.isEmpty)
             #expect(await broadcaster.state == .playback(mode))
@@ -79,8 +79,8 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            let frames = await collectFrames(from: sink, upTo: 3)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 3)
+            await broadcaster.shutdown()
 
             #expect(frames.count == 3)
             #expect(frames.map(\.presentationTime) == [0.0, 0.1, 0.2])
@@ -97,8 +97,8 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            let frames = await collectFrames(from: sink, upTo: 2)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 2)
+            await broadcaster.shutdown()
 
             #expect(frames.count == 2)
         }
@@ -115,7 +115,7 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            let initial = await collectFrames(from: sink, upTo: 1)
+            let initial = await collectFrames(from: sink, atLeast: 1)
             #expect(initial.count == 1)
 
             await broadcaster.handle(.startDecoy(.once))
@@ -127,7 +127,7 @@ struct BroadcasterIntegrationTests {
 
             let after = await sink.frames
             #expect(after.count == 1)
-            try await broadcaster.shutdown()
+            await broadcaster.shutdown()
         }
     }
 
@@ -141,12 +141,12 @@ struct BroadcasterIntegrationTests {
         } operation: {
             let broadcaster = Broadcaster(state: .playback(.once))
             // No frames yet — routing not active.
-            let beforeReturn = await collectFrames(from: sink, upTo: 0)
+            let beforeReturn = await collectFrames(from: sink, atLeast: 0)
             #expect(beforeReturn.isEmpty)
 
             await broadcaster.handle(.returnToLive)
-            let frames = await collectFrames(from: sink, upTo: 1)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 1)
+            await broadcaster.shutdown()
 
             #expect(frames.count == 1)
             #expect(await broadcaster.state == .live)
@@ -163,13 +163,13 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            let initial = await collectFrames(from: sink, upTo: 1)
+            let initial = await collectFrames(from: sink, atLeast: 1)
             #expect(initial.count == 1)
 
             await broadcaster.handle(foreign)
             await source.append([Self.frame(0.1)])
-            let after = await collectFrames(from: sink, upTo: 2)
-            try await broadcaster.shutdown()
+            let after = await collectFrames(from: sink, atLeast: 2)
+            await broadcaster.shutdown()
 
             #expect(after.count == 2)
             #expect(await broadcaster.state == .live)
@@ -187,15 +187,15 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            _ = await collectFrames(from: sink, upTo: 1)
+            _ = await collectFrames(from: sink, atLeast: 1)
 
             await broadcaster.handle(.returnToLive)
             await broadcaster.handle(.returnToLive)
             await broadcaster.handle(.returnToLive)
 
             await source.append([Self.frame(0.1)])
-            let frames = await collectFrames(from: sink, upTo: 2)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 2)
+            await broadcaster.shutdown()
 
             // Source must have been subscribed exactly once — repeated
             // returnToLive while already live is a no-op for routing.
@@ -216,8 +216,8 @@ struct BroadcasterIntegrationTests {
             await broadcaster.handle(.startDecoy(.loop))
             await broadcaster.handle(.startDecoy(.pingPong))
 
-            let frames = await collectFrames(from: sink, upTo: 0)
-            try await broadcaster.shutdown()
+            let frames = await collectFrames(from: sink, atLeast: 0)
+            await broadcaster.shutdown()
 
             #expect(frames.isEmpty)
             #expect(await source.subscribeCount == 0)
@@ -233,13 +233,13 @@ struct BroadcasterIntegrationTests {
             $0.virtualCameraSink = sink
         } operation: {
             let broadcaster = Broadcaster()
-            _ = await collectFrames(from: sink, upTo: 1)
+            _ = await collectFrames(from: sink, atLeast: 1)
             #expect(await source.subscribeCount == 1)
 
             await broadcaster.handle(.startDecoy(.once))
             await broadcaster.handle(.returnToLive)
-            _ = await collectFrames(from: sink, upTo: 1)
-            try await broadcaster.shutdown()
+            _ = await collectFrames(from: sink, atLeast: 1)
+            await broadcaster.shutdown()
 
             // returnToLive after startDecoy must call source.frames() again.
             #expect(await source.subscribeCount == 2)
@@ -259,7 +259,7 @@ extension BroadcasterIntegrationTests {
     /// buffer after the settle window.
     private func collectFrames(
         from sink: InMemoryVirtualCameraSink,
-        upTo count: Int
+        atLeast count: Int
     ) async -> [Frame] {
         let maxPolls = 100
         for _ in 0..<maxPolls {
@@ -293,10 +293,6 @@ private actor HoldingCameraSource {
         }
     }
 
-    private func register(_ continuation: AsyncStream<Frame>.Continuation, id: UUID) {
-        continuations[id] = continuation
-    }
-
     private func unregister(id: UUID) {
         continuations.removeValue(forKey: id)
     }
@@ -305,14 +301,13 @@ private actor HoldingCameraSource {
 extension HoldingCameraSource: CameraSource {
     func frames() async -> AsyncStream<Frame> {
         subscribeCount += 1
-        let snapshot = preset
         let id = UUID()
-        return AsyncStream { continuation in
-            snapshot.forEach { _ = continuation.yield($0) }
-            Task { [weak self] in await self?.register(continuation, id: id) }
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.unregister(id: id) }
-            }
+        let (stream, continuation) = AsyncStream.makeStream(of: Frame.self)
+        preset.forEach { _ = continuation.yield($0) }
+        continuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.unregister(id: id) }
         }
+        return stream
     }
 }
