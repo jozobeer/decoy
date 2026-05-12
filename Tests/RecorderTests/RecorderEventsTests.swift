@@ -230,7 +230,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0, ms: 50) {
+            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
             }
@@ -255,7 +255,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0, ms: 50) {
+            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
                 await recorder.handle(foreign)
             }
             #expect(events.isEmpty)
@@ -273,7 +273,7 @@ struct RecorderEventsTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
-            let events = await collectEventsWithTimeout(from: recorder, expecting: 0, ms: 50) {
+            let events = await collectEventsWithTimeout(from: recorder, expecting: 0) {
                 await recorder.handle(.stopRecording)
             }
             #expect(events.isEmpty)
@@ -429,23 +429,32 @@ extension RecorderEventsTests {
 
     /// Collect a deterministic number of events while running an action.
     /// Subscribes BEFORE running the action so all events are observed.
+    /// Bounded with a hang-guard (5s) so a regression that drops an expected
+    /// event surfaces as a test failure rather than a CI-timeout-level hang.
     fileprivate func collectEvents(
         from recorder: Recorder,
         count: Int,
         while action: @Sendable () async -> Void
     ) async -> [Recorder.Event] {
         let stream = await recorder.events
-        async let collected: [Recorder.Event] = take(stream, count: count)
+        let collector = Task<[Recorder.Event], Never> { await take(stream, count: count) }
+        let hangGuard = Task<Void, Never> {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            collector.cancel()
+        }
         await action()
-        return await collected
+        let result = await collector.value
+        hangGuard.cancel()
+        return result
     }
 
-    /// Collect events that occur during an action, with a timeout to bound test runtime
-    /// when the expected event count is 0 (no event should fire).
+    /// Collect events that occur during an action, used for negative assertions
+    /// ("no event should fire"). Cancels the collector immediately after the
+    /// action returns — by then the actor has processed all queued messages
+    /// and any events have already been broadcast (or not).
     fileprivate func collectEventsWithTimeout(
         from recorder: Recorder,
         expecting: Int,
-        ms: UInt64,
         while action: @Sendable () async -> Void
     ) async -> [Recorder.Event] {
         let stream = await recorder.events
@@ -453,7 +462,6 @@ extension RecorderEventsTests {
             await take(stream, count: max(expecting, 1))
         }
         await action()
-        try? await Task.sleep(nanoseconds: ms * 1_000_000)
         collector.cancel()
         return await collector.value
     }
