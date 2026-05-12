@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Dependencies
 import DependencyInjection
 import Domain
@@ -13,6 +14,8 @@ public actor Recorder {
     private var consumption: Task<Void, Never>?
     private var buffer: [Frame] = []
     private var recordedAt: Date?
+
+    private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Recorder")
 
     public init() {}
 
@@ -46,6 +49,7 @@ extension Recorder {
 
     private func endRecording() async {
         guard state == .recording else { return }
+        consumption?.cancel()
         await consumption?.value
     }
 
@@ -70,7 +74,8 @@ extension Recorder {
         do {
             try await clipStore.save(clip)
         } catch {
-            // TODO(#14): surface save failures via Event stream
+            // TODO(#14): surface save failures via Event stream — logging is a stopgap
+            Self.logger.error("ClipStore.save failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
