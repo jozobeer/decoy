@@ -119,6 +119,48 @@ struct RecorderSubscriptionTests {
         }
     }
 
+    @Test func subscriptionDrop_terminatesInFlightIteration() async throws {
+        // A consumer that extracted `subscription.events` into a long-
+        // lived Task (separate from the token's lifetime) must see the
+        // stream terminate cleanly when the token is dropped. Without
+        // `removeSubscriber` calling `finish()`, the iterator would
+        // hang forever waiting for the next element since the
+        // `AsyncStream` value held by the Task keeps the buffer alive.
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+        let store = InMemoryClipStore()
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = store
+            $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
+        } operation: {
+            let recorder = Recorder()
+            // Extract `.events` into a separate scope; the token drops
+            // at the end of the closure.
+            let stream: AsyncStream<Recorder.Event> = await {
+                let subscription = await recorder.subscribeEvents()
+                let events = subscription.events
+                _ = subscription.events  // keep alive through await
+                return events
+            }()
+            // Consumer keeps iterating the stream.
+            let iterator = Task<Int, Never> {
+                var count = 0
+                for await _ in stream { count += 1 }
+                return count
+            }
+            // Subscription dropped after the closure returned; deinit
+            // → cleanup → removeSubscriber → finish() should end the
+            // iteration deterministically.
+            for _ in 0..<50 { await Task.megaYield() }
+            let observed = await iterator.value
+            // No events were broadcast (recorder never started), so the
+            // iteration count is 0 and the loop terminated cleanly.
+            #expect(observed == 0)
+        }
+    }
+
     @Test func multipleSubscriptions_independentCleanup() async throws {
         // Two subscriptions; dropping one must not affect the other.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])

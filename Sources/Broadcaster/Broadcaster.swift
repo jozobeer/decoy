@@ -186,8 +186,13 @@ extension Broadcaster {
         terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
+    /// Unregister the subscriber AND deterministically terminate its
+    /// stream. The `finish()` ensures a consumer that extracted
+    /// `subscription.events` into a separate `Task` doesn't hang on
+    /// the next `await` after the dict entry is dropped — mirrors
+    /// `Recorder.removeSubscriber(id:)`.
     private func removeSubscriber(id: UUID) {
-        subscribers.removeValue(forKey: id)
+        subscribers.removeValue(forKey: id)?.finish()
     }
 
     /// Test-only hook for verifying cleanup. Reflects the live size of

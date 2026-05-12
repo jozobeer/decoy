@@ -105,6 +105,40 @@ struct BroadcasterSubscriptionTests {
         }
     }
 
+    @Test func subscriptionDrop_terminatesInFlightIteration() async throws {
+        // Mirrors `RecorderSubscription.subscriptionDrop_...` — verifies
+        // the `finish()` call inside `removeSubscriber` deterministically
+        // ends an in-flight iteration when the token is dropped, even if
+        // the consumer extracted `subscription.events` into a separate
+        // Task.
+        let source = InMemoryCameraSource(emitting: [])
+        let sink = InMemoryVirtualCameraSink()
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = InMemoryClipStore()
+            $0.virtualCameraSink = sink
+            $0.continuousClock = ImmediateClock()
+        } operation: {
+            let broadcaster = Broadcaster()
+            let stream: AsyncStream<Broadcaster.Event> = await {
+                let subscription = await broadcaster.subscribeEvents()
+                let events = subscription.events
+                _ = subscription.events  // keep alive through await
+                return events
+            }()
+            let iterator = Task<Int, Never> {
+                var count = 0
+                for await _ in stream { count += 1 }
+                return count
+            }
+            for _ in 0..<50 { await Task.megaYield() }
+            let observed = await iterator.value
+            #expect(observed == 0)
+            await broadcaster.shutdown()
+        }
+    }
+
     @Test func multipleSubscriptions_independentCleanup() async throws {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0, 0xAA)])
         let sink = FailingSink(error: TestError(label: "independent"))

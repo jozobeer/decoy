@@ -149,8 +149,14 @@ extension Recorder {
         terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
+    /// Unregister the subscriber AND deterministically terminate its
+    /// stream. Without the `finish()` call, a consumer that extracted
+    /// `subscription.events` into a long-lived `Task` (separate from the
+    /// token's lifetime) would hang on the next `await` after we drop
+    /// the dict entry, because their `AsyncStream` value still holds
+    /// the buffer alive and never sees termination.
     private func removeSubscriber(id: UUID) {
-        subscribers.removeValue(forKey: id)
+        subscribers.removeValue(forKey: id)?.finish()
     }
 
     /// Test-only hook for verifying cleanup. Reflects the live size of
