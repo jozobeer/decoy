@@ -37,21 +37,21 @@ public actor Recorder {
         }
     }
 
-    /// Returns a fresh broadcast stream. Cleanup happens via two paths in
-    /// this implementation:
-    /// 1. `onTermination` fires when the consumer's task is cancelled
-    ///    (the most common path: a test or view-model that wraps
-    ///    iteration in `Task { ... }` cancels on teardown).
-    /// 2. `broadcast` removes any subscriber whose `yield(_:)` returns
-    ///    `.terminated`, providing a lazy cleanup at the next event.
-    ///
-    /// **Known gap**: if a caller obtains the stream and either abandons
-    /// it without iterating, or breaks the `for-await` loop normally (no
-    /// cancellation), neither path fires until the next broadcast catches
-    /// `.terminated`. Long-running sessions with many such streams will
-    /// accumulate stale entries. Tracked separately for a
-    /// Subscription-token redesign in #17.
-    public func subscribeEvents() -> AsyncStream<Event> {
+    /// Returns a `Subscription` token whose lifetime owns the
+    /// underlying subscriber slot. Cleanup happens via three converging
+    /// paths — whichever fires first removes the bookkeeping entry, and
+    /// the others become idempotent no-ops:
+    /// 1. `Subscription.deinit` — fires deterministically when the
+    ///    caller drops the token (out-of-scope, never iterated,
+    ///    `for-await break`, abandoned in storage, etc.). Combine's
+    ///    `AnyCancellable` pattern.
+    /// 2. `onTermination` — fires when the consumer's iteration Task is
+    ///    cancelled (the legacy path; still valuable for callers that
+    ///    wrap iteration in a cancellable Task and rely on cancellation
+    ///    propagation).
+    /// 3. `broadcast` — removes any subscriber whose `yield(_:)` returns
+    ///    `.terminated` on the next event (final backstop).
+    public func subscribeEvents() -> Subscription {
         let (stream, continuation) = AsyncStream.makeStream(
             of: Event.self,
             bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
@@ -61,7 +61,27 @@ public actor Recorder {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return stream
+        return Subscription(events: stream) { [weak self] in
+            Task { await self?.removeSubscriber(id: id) }
+        }
+    }
+}
+
+public extension Recorder {
+    /// Strong-ref token returned by `subscribeEvents()`. Drop the token
+    /// (out-of-scope, deinit) to deterministically remove the subscriber
+    /// slot — closes the "never iterated" / "for-await break" gap that
+    /// the bare `AsyncStream` return type left open.
+    final class Subscription: Sendable {
+        public let events: AsyncStream<Event>
+        private let cleanup: @Sendable () -> Void
+
+        init(events: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
+            self.events = events
+            self.cleanup = cleanup
+        }
+
+        deinit { cleanup() }
     }
 }
 
@@ -132,4 +152,8 @@ extension Recorder {
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)
     }
+
+    /// Test-only hook for verifying cleanup. Reflects the live size of
+    /// the subscribers dict.
+    internal var subscriberCount: Int { subscribers.count }
 }

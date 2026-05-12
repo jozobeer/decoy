@@ -78,14 +78,13 @@ public actor Broadcaster {
         await stopRouting()
     }
 
-    /// Returns a fresh broadcast stream. Cleanup mirrors `Recorder` —
-    /// `onTermination` removes the subscriber on consumer cancel, and
-    /// `broadcast` does lazy cleanup of `.terminated` continuations on
-    /// the next event. Known gap (same as Recorder): consumers that
-    /// abandon the stream without cancellation leave stale entries
-    /// until the next broadcast catches `.terminated`. Tracked in #17
-    /// for a Subscription-token redesign that would cover both actors.
-    public func subscribeEvents() -> AsyncStream<Event> {
+    /// Returns a `Subscription` token whose lifetime owns the
+    /// underlying subscriber slot. Cleanup paths mirror `Recorder`:
+    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup.
+    /// 2. `onTermination` — cancellation-driven cleanup for iteration
+    ///    Tasks that cancel.
+    /// 3. `broadcast` — lazy `.terminated` cleanup as a final backstop.
+    public func subscribeEvents() -> Subscription {
         let (stream, continuation) = AsyncStream.makeStream(
             of: Event.self,
             bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
@@ -95,7 +94,27 @@ public actor Broadcaster {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return stream
+        return Subscription(events: stream) { [weak self] in
+            Task { await self?.removeSubscriber(id: id) }
+        }
+    }
+}
+
+public extension Broadcaster {
+    /// Strong-ref token returned by `subscribeEvents()`. Drop the token
+    /// to deterministically remove the subscriber slot — closes the gap
+    /// the bare `AsyncStream` return type left when callers abandoned
+    /// the stream without cancellation. Mirrors `Recorder.Subscription`.
+    final class Subscription: Sendable {
+        public let events: AsyncStream<Event>
+        private let cleanup: @Sendable () -> Void
+
+        init(events: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
+            self.events = events
+            self.cleanup = cleanup
+        }
+
+        deinit { cleanup() }
     }
 }
 
@@ -170,6 +189,10 @@ extension Broadcaster {
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)
     }
+
+    /// Test-only hook for verifying cleanup. Reflects the live size of
+    /// the subscribers dict.
+    internal var subscriberCount: Int { subscribers.count }
 
     private static func makeRoutingTask(
         state: OutputMode,

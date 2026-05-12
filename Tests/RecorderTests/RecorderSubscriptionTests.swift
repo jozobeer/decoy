@@ -35,6 +35,7 @@ struct RecorderSubscriptionTests {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
             let subscription = await recorder.subscribeEvents()
@@ -67,12 +68,19 @@ struct RecorderSubscriptionTests {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
             do {
-                _ = await recorder.subscribeEvents()
+                let transient = await recorder.subscribeEvents()
                 let mid = await recorder.subscriberCount
                 #expect(mid == 1)
+                // Reference `transient` after the await so ARC keeps it
+                // alive through the count check. Without this, the
+                // compiler is free to release the binding immediately
+                // after subscribeEvents returns and the deinit cleanup
+                // races the count check.
+                _ = transient.events
             }
             // Subscription dropped → deinit fires cleanup Task. Yield
             // until the Task reaches the actor.
@@ -93,6 +101,7 @@ struct RecorderSubscriptionTests {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
             do {
@@ -102,6 +111,7 @@ struct RecorderSubscriptionTests {
                 for await _ in subscription.events { break }
                 let mid = await recorder.subscriberCount
                 #expect(mid == 1)
+                _ = subscription.events
             }
             for _ in 0..<50 { await Task.megaYield() }
             let final = await recorder.subscriberCount
@@ -118,13 +128,15 @@ struct RecorderSubscriptionTests {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
         } operation: {
             let recorder = Recorder()
             let persistent = await recorder.subscribeEvents()
             do {
-                _ = await recorder.subscribeEvents()
+                let transient = await recorder.subscribeEvents()
                 let mid = await recorder.subscriberCount
                 #expect(mid == 2)
+                _ = transient.events
             }
             for _ in 0..<50 { await Task.megaYield() }
             let after = await recorder.subscriberCount

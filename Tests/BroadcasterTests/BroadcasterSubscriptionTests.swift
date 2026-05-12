@@ -65,9 +65,13 @@ struct BroadcasterSubscriptionTests {
         } operation: {
             let broadcaster = Broadcaster()
             do {
-                _ = await broadcaster.subscribeEvents()
+                let transient = await broadcaster.subscribeEvents()
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 1)
+                // Reference transient after the await so ARC keeps it
+                // alive through the count check (otherwise deinit races
+                // the assertion).
+                _ = transient.events
             }
             for _ in 0..<50 { await Task.megaYield() }
             let final = await broadcaster.subscriberCount
@@ -92,6 +96,7 @@ struct BroadcasterSubscriptionTests {
                 for await _ in subscription.events { break }
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 1)
+                _ = subscription.events
             }
             for _ in 0..<50 { await Task.megaYield() }
             let final = await broadcaster.subscriberCount
@@ -113,9 +118,10 @@ struct BroadcasterSubscriptionTests {
             let broadcaster = Broadcaster()
             let persistent = await broadcaster.subscribeEvents()
             do {
-                _ = await broadcaster.subscribeEvents()
+                let transient = await broadcaster.subscribeEvents()
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 2)
+                _ = transient.events
             }
             for _ in 0..<50 { await Task.megaYield() }
             let after = await broadcaster.subscriberCount

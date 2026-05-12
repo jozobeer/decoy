@@ -334,11 +334,11 @@ struct RecorderEventsTests {
         } operation: {
             let recorder = Recorder()
 
-            let firstStream = await recorder.subscribeEvents()
-            let secondStream = await recorder.subscribeEvents()
+            let firstSub = await recorder.subscribeEvents()
+            let secondSub = await recorder.subscribeEvents()
 
-            async let firstEvents: [Recorder.Event] = take(firstStream, count: 1)
-            async let secondEvents: [Recorder.Event] = take(secondStream, count: 1)
+            async let firstEvents: [Recorder.Event] = take(firstSub.events, count: 1)
+            async let secondEvents: [Recorder.Event] = take(secondSub.events, count: 1)
 
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
@@ -371,8 +371,8 @@ struct RecorderEventsTests {
             await recorder.handle(.startRecording)
 
             // subscribe AFTER start but BEFORE stop
-            let stream = await recorder.subscribeEvents()
-            async let events: [Recorder.Event] = take(stream, count: 1)
+            let subscription = await recorder.subscribeEvents()
+            async let events: [Recorder.Event] = take(subscription.events, count: 1)
 
             await recorder.handle(.stopRecording)
 
@@ -397,15 +397,15 @@ struct RecorderEventsTests {
         } operation: {
             let recorder = Recorder()
 
-            let persistentStream = await recorder.subscribeEvents()
-            let cancelledStream = await recorder.subscribeEvents()
+            let persistentSub = await recorder.subscribeEvents()
+            let cancelledSub = await recorder.subscribeEvents()
 
             // Persistent subscriber that will observe the event.
-            async let persistentEvents: [Recorder.Event] = take(persistentStream, count: 1)
+            async let persistentEvents: [Recorder.Event] = take(persistentSub.events, count: 1)
 
             // Doomed subscriber that gets cancelled before any event flows.
-            let doomed = Task<[Recorder.Event], Never> {
-                await take(cancelledStream, count: 1)
+            let doomed = Task<[Recorder.Event], Never> { [cancelledSub] in
+                await take(cancelledSub.events, count: 1)
             }
             doomed.cancel()
             _ = await doomed.value
@@ -448,9 +448,9 @@ extension RecorderEventsTests {
         upTo count: Int,
         while action: @Sendable () async -> Void
     ) async -> [Recorder.Event] {
-        let stream = await recorder.subscribeEvents()
-        let collector = Task<[Recorder.Event], Never> {
-            await drain(stream)
+        let subscription = await recorder.subscribeEvents()
+        let collector = Task<[Recorder.Event], Never> { [subscription] in
+            await drain(subscription.events)
         }
         await action()
         let drainCycles = max(count + 2, 4)
