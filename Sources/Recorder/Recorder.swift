@@ -95,15 +95,24 @@ extension Recorder {
             try await clipStore.save(clip)
             broadcast(.saved(clip))
         } catch {
-            if subscribers.isEmpty {
-                Self.logger.error("ClipStore.save failed (no event subscribers): \(error.localizedDescription, privacy: .public)")
-            }
+            Self.logger.error("ClipStore.save failed: \(error.localizedDescription, privacy: .public)")
             broadcast(.saveFailed(error))
         }
     }
 
     private func broadcast(_ event: Event) {
-        subscribers.values.forEach { $0.yield(event) }
+        let snapshot = subscribers
+        let terminated = snapshot.compactMap { id, continuation -> UUID? in
+            switch continuation.yield(event) {
+            case .enqueued: return nil
+            case .dropped:
+                Self.logger.warning("Recorder event dropped for subscriber \(id.uuidString, privacy: .public) (buffer full)")
+                return nil
+            case .terminated: return id
+            @unknown default: return nil
+            }
+        }
+        terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
     private func removeSubscriber(id: UUID) {
