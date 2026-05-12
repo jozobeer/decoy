@@ -358,7 +358,7 @@ struct RecorderEventsTests {
     }
 
     @Test func subscriberAfterRecordingStart_stillReceivesSavedEvent() async throws {
-        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+        let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
         try await withDependencies {
@@ -486,4 +486,29 @@ extension FailingClipStore: ClipStore {
 
 private struct TestError: Error, Equatable, Sendable {
     let label: String
+}
+
+/// CameraSource test double that emits the preset frames then keeps the
+/// stream open until the consumer cancels (via `stopRecording`). Unlike
+/// `InMemoryCameraSource`, this source does NOT auto-finish, so tests that
+/// need to subscribe AFTER recording starts (but BEFORE `finishRecording`
+/// runs) can rely on a deterministic ordering: subscribe → stopRecording
+/// → broadcast.
+private actor HoldingCameraSource {
+    private let preset: [Frame]
+
+    init(emitting frames: [Frame]) {
+        self.preset = frames
+    }
+}
+
+extension HoldingCameraSource: CameraSource {
+    func frames() async -> AsyncStream<Frame> {
+        let snapshot = preset
+        return AsyncStream { continuation in
+            snapshot.forEach { continuation.yield($0) }
+            // intentionally do not call `continuation.finish()` — wait for
+            // consumer cancellation triggered by Recorder.stopRecording.
+        }
+    }
 }
