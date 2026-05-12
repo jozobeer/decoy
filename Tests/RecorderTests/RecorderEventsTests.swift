@@ -428,12 +428,17 @@ struct RecorderEventsTests {
 extension RecorderEventsTests {
 
     /// Collect events emitted while running an action. Subscribes BEFORE the
-    /// action so all events are observed. Cancels the collector immediately
-    /// after the action returns — by then the actor has processed all queued
-    /// commands (e.g. `stopRecording` awaits `consumption?.value`) and any
-    /// events have already been broadcast. The caller asserts on the
-    /// returned array's count, so a regression that drops an expected event
-    /// surfaces as an assertion failure rather than a wall-clock hang.
+    /// action so all events are observed.
+    ///
+    /// `upTo count > 0` (positive assertion): `take(_:count:)` naturally
+    /// breaks at `count`. We don't cancel — that would race against the
+    /// consumer task reading values that `broadcast` just enqueued.
+    /// A regression that drops an expected event surfaces as a CI-level
+    /// timeout, not a false pass.
+    ///
+    /// `upTo count == 0` (negative assertion): the take loop has no natural
+    /// stop, so we yield once to give the consumer a scheduling slot for
+    /// any unexpected event, then cancel to unblock.
     fileprivate func collectEvents(
         from recorder: Recorder,
         upTo count: Int,
@@ -444,6 +449,8 @@ extension RecorderEventsTests {
             await take(stream, count: max(count, 1))
         }
         await action()
+        guard count == 0 else { return await collector.value }
+        await Task.yield()
         collector.cancel()
         return await collector.value
     }
