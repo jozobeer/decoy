@@ -61,6 +61,7 @@ let package = Package(
                 "InMemoryCameraSource",
                 "InMemoryClipStore",
                 .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
             ]
         ),
         .testTarget(
