@@ -1,9 +1,11 @@
 import Testing
 import Foundation
+import Clocks
 import Dependencies
 import DependencyInjection
 import Domain
 import InMemoryCameraSource
+import InMemoryClipStore
 import InMemoryVirtualCameraSink
 @testable import Broadcaster
 
@@ -25,6 +27,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             let frames = await collectFrames(from: sink, atLeast: 1)
@@ -42,6 +46,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster(state: .live)
             let frames = await collectFrames(from: sink, atLeast: 1)
@@ -59,6 +65,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster(state: .playback(mode))
             let frames = await collectFrames(from: sink, atLeast: 0)
@@ -81,6 +89,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             let frames = await collectFrames(from: sink, atLeast: 3)
@@ -99,6 +109,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             let frames = await collectFrames(from: sink, atLeast: 2)
@@ -117,6 +129,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             let initial = await collectFrames(from: sink, atLeast: 1)
@@ -142,6 +156,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster(state: .playback(.once))
             // No frames yet — routing not active. The empty-frames
@@ -168,6 +184,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             let initial = await collectFrames(from: sink, atLeast: 1)
@@ -192,6 +210,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             _ = await collectFrames(from: sink, atLeast: 1)
@@ -218,6 +238,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster(state: .playback(.once))
             await broadcaster.handle(.startDecoy(.loop))
@@ -238,6 +260,8 @@ struct BroadcasterIntegrationTests {
         try await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
+            $0.clipStore = InMemoryClipStore()
+            $0.continuousClock = ImmediateClock()
         } operation: {
             let broadcaster = Broadcaster()
             _ = await collectFrames(from: sink, atLeast: 1)
