@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Dependencies
 import DependencyInjection
 import Domain
@@ -20,6 +21,9 @@ public actor Recorder {
     private var recordedAt: Date?
     private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
 
+    private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Recorder")
+    private static let subscriberBufferLimit = 64
+
     public init() {}
 
     public func handle(_ command: AppCommand) async {
@@ -34,7 +38,10 @@ public actor Recorder {
     }
 
     public var events: AsyncStream<Event> {
-        let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: Event.self,
+            bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
+        )
         let id = UUID()
         subscribers[id] = continuation
         continuation.onTermination = { [weak self] _ in
@@ -88,6 +95,9 @@ extension Recorder {
             try await clipStore.save(clip)
             broadcast(.saved(clip))
         } catch {
+            if subscribers.isEmpty {
+                Self.logger.error("ClipStore.save failed (no event subscribers): \(error.localizedDescription, privacy: .public)")
+            }
             broadcast(.saveFailed(error))
         }
     }
