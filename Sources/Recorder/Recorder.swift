@@ -37,17 +37,20 @@ public actor Recorder {
         }
     }
 
-    /// Returns a fresh broadcast stream. Cleanup happens via three paths:
-    /// 1. `onTermination` fires when the consumer's task is cancelled or
-    ///    `finish()` is called — the most common path.
+    /// Returns a fresh broadcast stream. Cleanup happens via two paths in
+    /// this implementation:
+    /// 1. `onTermination` fires when the consumer's task is cancelled
+    ///    (the most common path: a test or view-model that wraps
+    ///    iteration in `Task { ... }` cancels on teardown).
     /// 2. `broadcast` removes any subscriber whose `yield(_:)` returns
     ///    `.terminated`, providing a lazy cleanup at the next event.
-    /// 3. **Known gap**: if a caller obtains the stream and abandons it
-    ///    without iterating or breaks the `for-await` loop normally (no
-    ///    cancellation), the continuation can remain in `subscribers`
-    ///    until the next broadcast catches `.terminated`. Long-running
-    ///    sessions with many abandoned streams will accumulate stale
-    ///    entries. Tracked separately for a Subscription-token redesign.
+    ///
+    /// **Known gap**: if a caller obtains the stream and either abandons
+    /// it without iterating, or breaks the `for-await` loop normally (no
+    /// cancellation), neither path fires until the next broadcast catches
+    /// `.terminated`. Long-running sessions with many such streams will
+    /// accumulate stale entries. Tracked separately for a
+    /// Subscription-token redesign in #17.
     public func subscribeEvents() -> AsyncStream<Event> {
         let (stream, continuation) = AsyncStream.makeStream(
             of: Event.self,
