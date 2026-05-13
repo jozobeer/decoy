@@ -8,6 +8,7 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
+        .executable(name: "Decoy", targets: ["Decoy"]),
         .library(name: "Domain", targets: ["Domain"]),
         .library(name: "Recorder", targets: ["Recorder"]),
         .library(name: "Broadcaster", targets: ["Broadcaster"]),
@@ -22,6 +23,7 @@ let package = Package(
         .package(url: "https://github.com/pointfreeco/swift-concurrency-extras", from: "1.0.0"),
     ],
     targets: [
+        .executableTarget(name: "Decoy"),
         .target(name: "Domain"),
         .target(
             name: "Recorder",
