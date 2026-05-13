@@ -79,8 +79,12 @@ public actor Broadcaster {
     }
 
     /// Returns a `Subscription` token whose lifetime owns the
-    /// underlying subscriber slot. Cleanup paths mirror `Recorder`:
-    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup.
+    /// underlying subscriber slot. The token IS the `AsyncSequence` —
+    /// `for await event in subscription { ... }` — and its iterator
+    /// strongly retains the token. Cleanup paths mirror `Recorder`:
+    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup
+    ///    when every iterator AND every external strong reference is
+    ///    released.
     /// 2. `onTermination` — cancellation-driven cleanup for iteration
     ///    Tasks that cancel.
     /// 3. `broadcast` — lazy `.terminated` cleanup as a final backstop.
@@ -94,27 +98,46 @@ public actor Broadcaster {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return Subscription(events: stream) { [weak self] in
+        return Subscription(stream: stream) { [weak self] in
             Task { await self?.removeSubscriber(id: id) }
         }
     }
 }
 
 public extension Broadcaster {
-    /// Strong-ref token returned by `subscribeEvents()`. Drop the token
-    /// to deterministically remove the subscriber slot — closes the gap
-    /// the bare `AsyncStream` return type left when callers abandoned
-    /// the stream without cancellation. Mirrors `Recorder.Subscription`.
-    final class Subscription: Sendable {
-        public let events: AsyncStream<Event>
+    /// Strong-ref token returned by `subscribeEvents()`. Iterate it
+    /// directly with `for await event in subscription` — the iterator
+    /// retains the token so the consumer cannot accidentally release
+    /// ownership while iterating. Mirrors `Recorder.Subscription`.
+    final class Subscription: AsyncSequence, Sendable {
+        public typealias Element = Event
+
+        private let stream: AsyncStream<Event>
         private let cleanup: @Sendable () -> Void
 
-        init(events: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
-            self.events = events
+        init(stream: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
+            self.stream = stream
             self.cleanup = cleanup
         }
 
         deinit { cleanup() }
+
+        public func makeAsyncIterator() -> AsyncIterator {
+            AsyncIterator(subscription: self, inner: stream.makeAsyncIterator())
+        }
+
+        public struct AsyncIterator: AsyncIteratorProtocol {
+            /// Strong ref keeps the parent `Subscription` alive for the
+            /// duration of iteration — closes the gap where extracting
+            /// the stream from a temporary token would let ARC release
+            /// the token before any event was delivered.
+            let subscription: Subscription
+            var inner: AsyncStream<Event>.AsyncIterator
+
+            public mutating func next() async -> Event? {
+                await inner.next()
+            }
+        }
     }
 }
 
@@ -187,9 +210,9 @@ extension Broadcaster {
     }
 
     /// Unregister the subscriber AND deterministically terminate its
-    /// stream. The `finish()` ensures a consumer that extracted
-    /// `subscription.events` into a separate `Task` doesn't hang on
-    /// the next `await` after the dict entry is dropped — mirrors
+    /// stream. The `finish()` ensures any active iterator exits cleanly
+    /// when cleanup runs from a path other than the iterator itself
+    /// (e.g., `onTermination` from a cancelled Task). Mirrors
     /// `Recorder.removeSubscriber(id:)`.
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)?.finish()

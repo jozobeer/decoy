@@ -337,8 +337,8 @@ struct RecorderEventsTests {
             let firstSub = await recorder.subscribeEvents()
             let secondSub = await recorder.subscribeEvents()
 
-            async let firstEvents: [Recorder.Event] = take(firstSub.events, count: 1)
-            async let secondEvents: [Recorder.Event] = take(secondSub.events, count: 1)
+            async let firstEvents: [Recorder.Event] = take(firstSub, count: 1)
+            async let secondEvents: [Recorder.Event] = take(secondSub, count: 1)
 
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
@@ -372,7 +372,7 @@ struct RecorderEventsTests {
 
             // subscribe AFTER start but BEFORE stop
             let subscription = await recorder.subscribeEvents()
-            async let events: [Recorder.Event] = take(subscription.events, count: 1)
+            async let events: [Recorder.Event] = take(subscription, count: 1)
 
             await recorder.handle(.stopRecording)
 
@@ -401,11 +401,11 @@ struct RecorderEventsTests {
             let cancelledSub = await recorder.subscribeEvents()
 
             // Persistent subscriber that will observe the event.
-            async let persistentEvents: [Recorder.Event] = take(persistentSub.events, count: 1)
+            async let persistentEvents: [Recorder.Event] = take(persistentSub, count: 1)
 
             // Doomed subscriber that gets cancelled before any event flows.
             let doomed = Task<[Recorder.Event], Never> { [cancelledSub] in
-                await take(cancelledSub.events, count: 1)
+                await take(cancelledSub, count: 1)
             }
             doomed.cancel()
             _ = await doomed.value
@@ -450,7 +450,7 @@ extension RecorderEventsTests {
     ) async -> [Recorder.Event] {
         let subscription = await recorder.subscribeEvents()
         let collector = Task<[Recorder.Event], Never> { [subscription] in
-            await drain(subscription.events)
+            await drain(subscription)
         }
         await action()
         let drainCycles = max(count + 2, 4)
@@ -459,17 +459,17 @@ extension RecorderEventsTests {
         return await collector.value
     }
 
-    private func drain(_ stream: AsyncStream<Recorder.Event>) async -> [Recorder.Event] {
+    private func drain(_ subscription: Recorder.Subscription) async -> [Recorder.Event] {
         var collected: [Recorder.Event] = []
-        for await event in stream {
+        for await event in subscription {
             collected.append(event)
         }
         return collected
     }
 
-    private func take(_ stream: AsyncStream<Recorder.Event>, count: Int) async -> [Recorder.Event] {
+    private func take(_ subscription: Recorder.Subscription, count: Int) async -> [Recorder.Event] {
         var collected: [Recorder.Event] = []
-        for await event in stream {
+        for await event in subscription {
             collected.append(event)
             if collected.count >= count { break }
         }

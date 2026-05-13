@@ -14,8 +14,9 @@ import InMemoryVirtualCameraSink
 /// `Broadcaster.subscribeEvents()`. Mirrors `RecorderSubscription` — the
 /// previous `AsyncStream` return type left a cleanup gap when callers
 /// abandoned the stream without iterating or broke out of `for-await`
-/// normally. The token's `deinit` closes that gap by driving cleanup
-/// deterministically.
+/// normally. The token is itself the `AsyncSequence`, and its iterator
+/// strongly retains the token; cleanup converges deterministically when
+/// every reference is released.
 @Suite("BroadcasterSubscription", .timeLimit(.minutes(1)))
 struct BroadcasterSubscriptionTests {
 
@@ -23,11 +24,11 @@ struct BroadcasterSubscriptionTests {
         Frame(presentationTime: pts, data: Data([byte]))
     }
 
-    // MARK: - Subscription exposes events stream
+    // MARK: - Subscription IS the AsyncSequence
 
-    @Test func subscription_exposesEventsStream() async throws {
+    @Test func subscription_isIterable() async throws {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0, 0xAA)])
-        let sink = FailingSink(error: TestError(label: "expose"))
+        let sink = FailingSink(error: TestError(label: "iterate"))
 
         try await withDependencies {
             $0.cameraSource = source
@@ -38,7 +39,7 @@ struct BroadcasterSubscriptionTests {
             let broadcaster = Broadcaster()
             let subscription = await broadcaster.subscribeEvents()
             var observed: [Broadcaster.Event] = []
-            for await event in subscription.events {
+            for await event in subscription {
                 observed.append(event)
                 break
             }
@@ -68,10 +69,10 @@ struct BroadcasterSubscriptionTests {
                 let transient = await broadcaster.subscribeEvents()
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 1)
-                // Reference transient after the await so ARC keeps it
+                // Reference `transient` after the await so ARC keeps it
                 // alive through the count check (otherwise deinit races
                 // the assertion).
-                _ = transient.events
+                _ = transient
             }
             for _ in 0..<50 { await Task.megaYield() }
             let final = await broadcaster.subscriberCount
@@ -93,48 +94,14 @@ struct BroadcasterSubscriptionTests {
             let broadcaster = Broadcaster()
             do {
                 let subscription = await broadcaster.subscribeEvents()
-                for await _ in subscription.events { break }
+                for await _ in subscription { break }
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 1)
-                _ = subscription.events
+                _ = subscription
             }
             for _ in 0..<50 { await Task.megaYield() }
             let final = await broadcaster.subscriberCount
             #expect(final == 0)
-            await broadcaster.shutdown()
-        }
-    }
-
-    @Test func subscriptionDrop_terminatesInFlightIteration() async throws {
-        // Mirrors `RecorderSubscription.subscriptionDrop_...` — verifies
-        // the `finish()` call inside `removeSubscriber` deterministically
-        // ends an in-flight iteration when the token is dropped, even if
-        // the consumer extracted `subscription.events` into a separate
-        // Task.
-        let source = InMemoryCameraSource(emitting: [])
-        let sink = InMemoryVirtualCameraSink()
-
-        try await withDependencies {
-            $0.cameraSource = source
-            $0.clipStore = InMemoryClipStore()
-            $0.virtualCameraSink = sink
-            $0.continuousClock = ImmediateClock()
-        } operation: {
-            let broadcaster = Broadcaster()
-            let stream: AsyncStream<Broadcaster.Event> = await {
-                let subscription = await broadcaster.subscribeEvents()
-                let events = subscription.events
-                _ = subscription.events  // keep alive through await
-                return events
-            }()
-            let iterator = Task<Int, Never> {
-                var count = 0
-                for await _ in stream { count += 1 }
-                return count
-            }
-            for _ in 0..<50 { await Task.megaYield() }
-            let observed = await iterator.value
-            #expect(observed == 0)
             await broadcaster.shutdown()
         }
     }
@@ -155,13 +122,13 @@ struct BroadcasterSubscriptionTests {
                 let transient = await broadcaster.subscribeEvents()
                 let mid = await broadcaster.subscriberCount
                 #expect(mid == 2)
-                _ = transient.events
+                _ = transient
             }
             for _ in 0..<50 { await Task.megaYield() }
             let after = await broadcaster.subscriberCount
             #expect(after == 1)
             var observed = 0
-            for await _ in persistent.events {
+            for await _ in persistent {
                 observed += 1
                 break
             }

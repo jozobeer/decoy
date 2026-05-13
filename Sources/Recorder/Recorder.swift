@@ -38,19 +38,17 @@ public actor Recorder {
     }
 
     /// Returns a `Subscription` token whose lifetime owns the
-    /// underlying subscriber slot. Cleanup happens via three converging
-    /// paths — whichever fires first removes the bookkeeping entry, and
-    /// the others become idempotent no-ops:
-    /// 1. `Subscription.deinit` — fires deterministically when the
-    ///    caller drops the token (out-of-scope, never iterated,
-    ///    `for-await break`, abandoned in storage, etc.). Combine's
-    ///    `AnyCancellable` pattern.
-    /// 2. `onTermination` — fires when the consumer's iteration Task is
-    ///    cancelled (the legacy path; still valuable for callers that
-    ///    wrap iteration in a cancellable Task and rely on cancellation
-    ///    propagation).
-    /// 3. `broadcast` — removes any subscriber whose `yield(_:)` returns
-    ///    `.terminated` on the next event (final backstop).
+    /// underlying subscriber slot. The token IS the `AsyncSequence` —
+    /// `for await event in subscription { ... }` — and its iterator
+    /// strongly retains the token, so iteration cannot outlive
+    /// ownership. Cleanup converges from three paths, whichever fires
+    /// first wins and the others become idempotent no-ops:
+    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup
+    ///    when every iterator AND every external strong reference is
+    ///    released (Combine `AnyCancellable` pattern).
+    /// 2. `onTermination` — cancellation-driven cleanup for iteration
+    ///    Tasks that cancel.
+    /// 3. `broadcast` — lazy `.terminated` cleanup as a final backstop.
     public func subscribeEvents() -> Subscription {
         let (stream, continuation) = AsyncStream.makeStream(
             of: Event.self,
@@ -61,27 +59,48 @@ public actor Recorder {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return Subscription(events: stream) { [weak self] in
+        return Subscription(stream: stream) { [weak self] in
             Task { await self?.removeSubscriber(id: id) }
         }
     }
 }
 
 public extension Recorder {
-    /// Strong-ref token returned by `subscribeEvents()`. Drop the token
-    /// (out-of-scope, deinit) to deterministically remove the subscriber
-    /// slot — closes the "never iterated" / "for-await break" gap that
-    /// the bare `AsyncStream` return type left open.
-    final class Subscription: Sendable {
-        public let events: AsyncStream<Event>
+    /// Strong-ref token returned by `subscribeEvents()`. Iterate it
+    /// directly with `for await event in subscription` — the iterator
+    /// retains the token, so the consumer can't accidentally release
+    /// ownership while iterating. Drop every reference (token + all
+    /// active iterators) to deterministically remove the subscriber
+    /// slot.
+    final class Subscription: AsyncSequence, Sendable {
+        public typealias Element = Event
+
+        private let stream: AsyncStream<Event>
         private let cleanup: @Sendable () -> Void
 
-        init(events: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
-            self.events = events
+        init(stream: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
+            self.stream = stream
             self.cleanup = cleanup
         }
 
         deinit { cleanup() }
+
+        public func makeAsyncIterator() -> AsyncIterator {
+            AsyncIterator(subscription: self, inner: stream.makeAsyncIterator())
+        }
+
+        public struct AsyncIterator: AsyncIteratorProtocol {
+            /// Strong ref keeps the parent `Subscription` alive for the
+            /// duration of iteration — closes the gap where extracting
+            /// the stream from a temporary token would let ARC release
+            /// the token before any event was delivered.
+            let subscription: Subscription
+            var inner: AsyncStream<Event>.AsyncIterator
+
+            public mutating func next() async -> Event? {
+                await inner.next()
+            }
+        }
     }
 }
 
@@ -150,11 +169,9 @@ extension Recorder {
     }
 
     /// Unregister the subscriber AND deterministically terminate its
-    /// stream. Without the `finish()` call, a consumer that extracted
-    /// `subscription.events` into a long-lived `Task` (separate from the
-    /// token's lifetime) would hang on the next `await` after we drop
-    /// the dict entry, because their `AsyncStream` value still holds
-    /// the buffer alive and never sees termination.
+    /// stream. The `finish()` ensures any active iterator exits cleanly
+    /// when cleanup runs from a path other than the iterator itself
+    /// (e.g., `onTermination` from a cancelled Task).
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)?.finish()
     }

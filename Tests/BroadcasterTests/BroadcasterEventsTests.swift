@@ -475,8 +475,8 @@ struct BroadcasterEventsTests {
             let firstSub = await broadcaster.subscribeEvents()
             let secondSub = await broadcaster.subscribeEvents()
 
-            async let firstEvents: [Broadcaster.Event] = take(firstSub.events, count: 1)
-            async let secondEvents: [Broadcaster.Event] = take(secondSub.events, count: 1)
+            async let firstEvents: [Broadcaster.Event] = take(firstSub, count: 1)
+            async let secondEvents: [Broadcaster.Event] = take(secondSub, count: 1)
 
             // Force the routing task forward by yielding.
             await Task.megaYield()
@@ -514,7 +514,7 @@ struct BroadcasterEventsTests {
             await Task.megaYield()
 
             let lateSub = await broadcaster.subscribeEvents()
-            async let lateEvents: [Broadcaster.Event] = take(lateSub.events, count: 1)
+            async let lateEvents: [Broadcaster.Event] = take(lateSub, count: 1)
 
             // Append more frames — these will also fail and the late
             // subscriber must see at least one.
@@ -547,9 +547,9 @@ struct BroadcasterEventsTests {
             let persistentSub = await broadcaster.subscribeEvents()
             let cancelledSub = await broadcaster.subscribeEvents()
 
-            async let persistentEvents: [Broadcaster.Event] = take(persistentSub.events, count: 1)
+            async let persistentEvents: [Broadcaster.Event] = take(persistentSub, count: 1)
             let doomed = Task<[Broadcaster.Event], Never> { [cancelledSub] in
-                await take(cancelledSub.events, count: 1)
+                await take(cancelledSub, count: 1)
             }
             doomed.cancel()
             _ = await doomed.value
@@ -587,7 +587,7 @@ struct BroadcasterEventsTests {
         } operation: {
             let broadcaster = Broadcaster()
             let subscription = await broadcaster.subscribeEvents()
-            async let events: [Broadcaster.Event] = take(subscription.events, count: 2)
+            async let events: [Broadcaster.Event] = take(subscription, count: 2)
 
             await Task.megaYield()  // live frame fails → .sendFailed (1)
             await broadcaster.handle(.startDecoy(.once))
@@ -626,7 +626,7 @@ extension BroadcasterEventsTests {
         let subscription = await broadcaster.subscribeEvents()
         let buffer = EventBuffer()
         let collector = Task<Void, Never> { [subscription] in
-            for await event in subscription.events {
+            for await event in subscription {
                 await buffer.append(event)
             }
         }
@@ -642,9 +642,9 @@ extension BroadcasterEventsTests {
         return await buffer.snapshot
     }
 
-    private func take(_ stream: AsyncStream<Broadcaster.Event>, count: Int) async -> [Broadcaster.Event] {
+    private func take(_ subscription: Broadcaster.Subscription, count: Int) async -> [Broadcaster.Event] {
         var collected: [Broadcaster.Event] = []
-        for await event in stream {
+        for await event in subscription {
             collected.append(event)
             if collected.count >= count { break }
         }
