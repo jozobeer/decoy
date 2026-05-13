@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
         .library(name: "FileSystemClipStore", targets: ["FileSystemClipStore"]),
         .library(name: "AVCameraSource", targets: ["AVCameraSource"]),
+        .library(name: "AVCameraPermission", targets: ["AVCameraPermission"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -73,6 +74,7 @@ let package = Package(
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
         .target(name: "FileSystemClipStore", dependencies: ["Domain"]),
         .target(name: "AVCameraSource", dependencies: ["Domain"]),
+        .target(name: "AVCameraPermission", dependencies: ["Domain"]),
         .target(
             name: "HotkeyService",
             dependencies: [
@@ -146,6 +148,7 @@ let package = Package(
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
         .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
         .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
+        .testTarget(name: "AVCameraPermissionTests", dependencies: ["AVCameraPermission", "Domain"]),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
             name: "MenuBarUITests",
