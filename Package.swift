@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "InMemoryVirtualCameraSink", targets: ["InMemoryVirtualCameraSink"]),
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
         .library(name: "FileSystemClipStore", targets: ["FileSystemClipStore"]),
+        .library(name: "AVCameraSource", targets: ["AVCameraSource"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
     ],
@@ -47,6 +48,7 @@ let package = Package(
         .target(name: "InMemoryVirtualCameraSink", dependencies: ["Domain"]),
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
         .target(name: "FileSystemClipStore", dependencies: ["Domain"]),
+        .target(name: "AVCameraSource", dependencies: ["Domain"]),
         .target(
             name: "DependencyInjection",
             dependencies: [
@@ -54,6 +56,7 @@ let package = Package(
                 "InMemoryClipStore",
                 "InMemoryVirtualCameraSink",
                 "InMemoryCameraSource",
+                "AVCameraSource",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
@@ -110,5 +113,6 @@ let package = Package(
         .testTarget(name: "InMemoryVirtualCameraSinkTests", dependencies: ["InMemoryVirtualCameraSink", "Domain"]),
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
         .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
+        .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
     ]
 )

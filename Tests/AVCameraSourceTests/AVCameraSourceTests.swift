@@ -1,0 +1,206 @@
+import Testing
+import Foundation
+import CoreVideo
+import Domain
+@testable import AVCameraSource
+
+@Suite("AVCameraSource")
+struct AVCameraSourceTests {
+    // MARK: - frames() basic contract
+
+    @Test("frames() returns an AsyncStream that yields frames pushed by the controller")
+    func framesYieldsControllerPushedFrames() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+        let f1 = Frame(presentationTime: 0.0, data: Data([0x01]))
+        let f2 = Frame(presentationTime: 0.033, data: Data([0x02]))
+
+        let stream = await source.frames()
+        await controller.push(f1)
+        await controller.push(f2)
+        await controller.finish()
+
+        let collected = await stream.reduce(into: [Frame]()) { $0.append($1) }
+        #expect(collected == [f1, f2])
+    }
+
+    @Test("frames() starts the controller on first subscriber")
+    func framesStartsController() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+
+        _ = await source.frames()
+        // give the actor a tick so the start hop completes
+        await Task.yield()
+        let started = await controller.startCount
+        #expect(started == 1)
+    }
+
+    @Test("dropping the last subscriber stops the controller")
+    func droppingLastSubscriberStopsController() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+
+        // iterate the stream from a Task, then cancel the Task —
+        // AsyncStream.onTermination fires, the actor cleans up the
+        // subscriber slot, and (because that was the last one) tells
+        // the controller to stop.
+        let task = Task {
+            let stream = await source.frames()
+            for await _ in stream {}
+        }
+        // let the subscribe + start hop complete
+        try? await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+        _ = await task.value
+        // let the actor observe onTermination and call stop()
+        try? await Task.sleep(for: .milliseconds(20))
+        let stopped = await controller.stopCount
+        #expect(stopped == 1)
+    }
+
+    @Test("multiple concurrent subscribers each receive frames")
+    func multipleSubscribersReceiveFrames() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+        let f = Frame(presentationTime: 1.0, data: Data([0xAB]))
+
+        let s1 = await source.frames()
+        let s2 = await source.frames()
+        await controller.push(f)
+        await controller.finish()
+
+        async let c1 = s1.reduce(into: [Frame]()) { $0.append($1) }
+        async let c2 = s2.reduce(into: [Frame]()) { $0.append($1) }
+        let (collected1, collected2) = await (c1, c2)
+        #expect(collected1 == [f])
+        #expect(collected2 == [f])
+    }
+
+    @Test("controller is started only once across multiple subscribers")
+    func controllerStartsOnceForMultipleSubscribers() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+
+        _ = await source.frames()
+        _ = await source.frames()
+        await Task.yield()
+        let started = await controller.startCount
+        #expect(started == 1)
+    }
+
+    @Test("controller stops only after the last subscriber finishes")
+    func controllerStopsAfterLastSubscriberFinishes() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+
+        let task1 = Task {
+            let stream = await source.frames()
+            for await _ in stream {}
+        }
+        let task2 = Task {
+            let stream = await source.frames()
+            for await _ in stream {}
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+
+        // cancel only the first subscriber — controller must still be
+        // alive because the second subscriber is still iterating
+        task1.cancel()
+        _ = await task1.value
+        try? await Task.sleep(for: .milliseconds(20))
+        let stoppedAfterFirst = await controller.stopCount
+        #expect(stoppedAfterFirst == 0)
+
+        // cancel the second — now the controller should stop
+        task2.cancel()
+        _ = await task2.value
+        try? await Task.sleep(for: .milliseconds(20))
+        let stoppedAfterSecond = await controller.stopCount
+        #expect(stoppedAfterSecond == 1)
+    }
+
+    // MARK: - frame ordering
+
+    @Test("frames are delivered in the order they are pushed")
+    func framesArePreservedInOrder() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+        let frames = (0..<5).map { i in
+            Frame(presentationTime: Double(i) * 0.033, data: Data([UInt8(i)]))
+        }
+
+        let stream = await source.frames()
+        for frame in frames {
+            await controller.push(frame)
+        }
+        await controller.finish()
+        let collected = await stream.reduce(into: [Frame]()) { $0.append($1) }
+        #expect(collected == frames)
+    }
+
+    // MARK: - permission denied
+
+    @Test("when authorization status is denied, init throws permissionDenied")
+    func deniedAuthorizationThrowsAtInit() {
+        let controller = FakeCaptureSessionController()
+        #expect(throws: AVCameraSourceError.permissionDenied) {
+            _ = try AVCameraSource.authorized(controller: controller, status: .denied)
+        }
+    }
+
+    @Test("when authorization status is restricted, init throws permissionDenied")
+    func restrictedAuthorizationThrowsAtInit() {
+        let controller = FakeCaptureSessionController()
+        #expect(throws: AVCameraSourceError.permissionDenied) {
+            _ = try AVCameraSource.authorized(controller: controller, status: .restricted)
+        }
+    }
+
+    @Test("when authorization status is authorized, init returns a usable instance")
+    func authorizedStatusReturnsSource() async throws {
+        let controller = FakeCaptureSessionController()
+        let source = try AVCameraSource.authorized(controller: controller, status: .authorized)
+        _ = await source.frames()
+        await Task.yield()
+        let started = await controller.startCount
+        #expect(started == 1)
+    }
+
+    @Test("when authorization status is notDetermined, init returns a usable instance (caller drives the prompt)")
+    func notDeterminedStatusReturnsSource() async throws {
+        let controller = FakeCaptureSessionController()
+        let source = try AVCameraSource.authorized(controller: controller, status: .notDetermined)
+        _ = await source.frames()
+        await Task.yield()
+        let started = await controller.startCount
+        #expect(started == 1)
+    }
+
+    // MARK: - controller start failure
+
+    @Test("when the controller fails to start, the stream finishes immediately")
+    func controllerStartFailureTerminatesStream() async {
+        struct StartFailure: Error {}
+        let controller = FakeCaptureSessionController(pendingStartError: StartFailure())
+        let source = AVCameraSource(controller: controller)
+
+        let stream = await source.frames()
+        let collected = await stream.reduce(into: [Frame]()) { $0.append($1) }
+        #expect(collected.isEmpty)
+    }
+
+    // MARK: - configuration contract
+
+    @Test("controller is configured for the requested pixel format on start")
+    func controllerReceivesPixelFormatOnStart() async {
+        let controller = FakeCaptureSessionController()
+        let source = AVCameraSource(controller: controller)
+
+        _ = await source.frames()
+        await Task.yield()
+        let pixelFormat = await controller.lastPixelFormat
+        // NV12: 420v
+        #expect(pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+    }
+}
