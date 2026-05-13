@@ -19,3 +19,11 @@ ignore:
   - "Sources/Domain/**"
   # DependencyInjection は wiring のみ（liveValue / testValue の一行結線）
   - "Sources/DependencyInjection/**"
+  # AVFoundation 直結部分はテスト不能（実機カメラが要る）。translation と
+  # lifecycle のロジックは AVCameraSource.swift / SampleBufferTranslator.swift
+  # に分離済みでカバー対象
+  - "Sources/AVCameraSource/AVFoundationCaptureSessionController.swift"
+  # live-wiring 専用 file ― AVCaptureDevice の OS lookup と
+  # authorization status の interrogation で構成。pure な認可分岐は
+  # AVCameraSource.authorized(controller:status:) 経由でテスト済み
+  - "Sources/AVCameraSource/AVCameraSource+Live.swift"
