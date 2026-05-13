@@ -15,11 +15,12 @@ import SwiftUI
 /// `state` properties back. This keeps the UI in lockstep with the
 /// underlying actors without inventing a parallel state machine.
 ///
-/// Lifetimes: `Subscription` tokens are stored as properties so they
-/// outlive the iteration Tasks. Cancelling those Tasks (via the
-/// nullification on deinit) terminates iteration; the deinit-driven
-/// cleanup on `Subscription` then releases the actor-side subscriber
-/// slot.
+/// Lifetimes: each `Subscription` token is held by its iterating Task
+/// (as a local `let token` retained by the `for await` loop). The
+/// view-model stores only the Tasks themselves. On `deinit` we cancel
+/// the Tasks; cancellation ends iteration, the `token` local drops,
+/// and the deinit-driven cleanup on `Subscription` releases the
+/// actor-side subscriber slot.
 @MainActor
 public final class MenuBarViewModel: ObservableObject {
     @Published public private(set) var recordingState: RecordingState = .idle

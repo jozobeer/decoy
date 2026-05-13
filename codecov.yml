@@ -27,8 +27,9 @@ ignore:
   # authorization status の interrogation で構成。pure な認可分岐は
   # AVCameraSource.authorized(controller:status:) 経由でテスト済み
   - "Sources/AVCameraSource/AVCameraSource+Live.swift"
-  # Decoy は Orchestrator ― actor/dispatcher/view-model を組み立てる
-  # 一段だけ。SPM の executableTarget はテスト不能なので除外。
+  # Decoy は Orchestrator ― actor / dispatcher / view-model を組み立てる
+  # 一段の wiring のみ。ロジックは MenuBarViewModel / AppCommandDispatcher
+  # 側でテスト済みなので、ここはカバー対象外。
   - "Sources/Decoy/**"
   # MenuView は SwiftUI 宣言のみ（ロジックは MenuBarViewModel へ集約）。
   # snapshot test 基盤を持っていないので除外。

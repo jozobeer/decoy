@@ -264,15 +264,19 @@ extension MenuBarViewModelTests {
         )
     }
 
-    /// Poll until `predicate` flips true. Used to await an event hop
-    /// that lands asynchronously after a dispatch returns. Bounded by
-    /// the suite's outer `.timeLimit` so a stuck condition still fails.
+    /// Poll until `predicate` flips true. Bounded at 200 ticks × 2ms ≈
+    /// 400ms so a missing transition fails the dependent assertion with
+    /// a clear "still false after wait" diagnostic instead of letting
+    /// the suite's outer `.timeLimit` swallow it as a generic timeout.
     fileprivate func waitForCondition(
-        _ predicate: @MainActor () -> Bool
+        _ predicate: @MainActor () -> Bool,
+        sourceLocation: SourceLocation = #_sourceLocation
     ) async {
-        while !predicate() {
-            await Task.yield()
+        for _ in 0..<200 {
+            if predicate() { return }
+            try? await Task.sleep(for: .milliseconds(2))
         }
+        Issue.record("waitForCondition: predicate did not become true within 400ms", sourceLocation: sourceLocation)
     }
 }
 
