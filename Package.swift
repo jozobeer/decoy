@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "InMemoryVirtualCameraSink", targets: ["InMemoryVirtualCameraSink"]),
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
+        .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
     ],
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.12.0"),
@@ -52,6 +53,14 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
+        .target(
+            name: "AppCommandDispatcher",
+            dependencies: [
+                "Domain",
+                "Recorder",
+                "Broadcaster",
+            ]
+        ),
         .testTarget(
             name: "RecorderTests",
             dependencies: [
@@ -76,6 +85,21 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "Clocks", package: "swift-clocks"),
                 .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
+            ]
+        ),
+        .testTarget(
+            name: "AppCommandDispatcherTests",
+            dependencies: [
+                "AppCommandDispatcher",
+                "Broadcaster",
+                "Recorder",
+                "Domain",
+                "DependencyInjection",
+                "InMemoryCameraSource",
+                "InMemoryClipStore",
+                "InMemoryVirtualCameraSink",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "Clocks", package: "swift-clocks"),
             ]
         ),
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),
