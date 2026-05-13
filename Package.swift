@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
         .library(name: "FileSystemClipStore", targets: ["FileSystemClipStore"]),
         .library(name: "AVCameraSource", targets: ["AVCameraSource"]),
+        .library(name: "AVCameraPermission", targets: ["AVCameraPermission"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -40,6 +41,25 @@ let package = Package(
                 "HotkeyService",
                 "MenuBarUI",
                 .product(name: "Dependencies", package: "swift-dependencies"),
+            ],
+            // Info.plist は SPM 的には resource ではなく linker に直接渡す
+            // 「ビルド資材」なので、target sources から除外して
+            // 「unhandled file」警告を抑える。
+            exclude: ["Info.plist"],
+            // `__TEXT,__info_plist` セクションに Info.plist を直接埋め込む。
+            // SPM の `executableTarget` は `.app` バンドルを生成しないので
+            // `resources: [.copy("Info.plist")]` だと `swift run` でも生成物の
+            // バイナリ単体でも Info.plist が読まれない。`-sectcreate` で
+            // バイナリの `__info_plist` セクションに直接埋めれば
+            // `[NSBundle mainBundle].infoDictionary` 経由で OS から見える ―
+            // `NSCameraUsageDescription` を OS の認可ダイアログが読みに来る経路。
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Decoy/Info.plist",
+                ]),
             ]
         ),
         .target(
@@ -73,6 +93,7 @@ let package = Package(
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
         .target(name: "FileSystemClipStore", dependencies: ["Domain"]),
         .target(name: "AVCameraSource", dependencies: ["Domain"]),
+        .target(name: "AVCameraPermission", dependencies: ["Domain"]),
         .target(
             name: "HotkeyService",
             dependencies: [
@@ -88,6 +109,7 @@ let package = Package(
                 "InMemoryVirtualCameraSink",
                 "InMemoryCameraSource",
                 "AVCameraSource",
+                "AVCameraPermission",
                 "HotkeyService",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
@@ -146,6 +168,7 @@ let package = Package(
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
         .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
         .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
+        .testTarget(name: "AVCameraPermissionTests", dependencies: ["AVCameraPermission", "Domain"]),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
             name: "MenuBarUITests",
