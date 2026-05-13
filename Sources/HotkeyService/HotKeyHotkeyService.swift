@@ -53,7 +53,8 @@ extension HotKeyHotkeyService: HotkeyService {
 extension HotKeyHotkeyService {
     /// Domain の `KeyboardShortcut.Key` を HotKey の `Key` enum に対応付ける。
     /// 表は全網羅 ― マッピング漏れがあるとそのキーが register できなくなる。
-    /// `HotKeyHotkeyServiceMappingTests` が表の網羅を保証する。
+    /// `HotKeyHotkeyServiceTests.allKeyboardShortcutKeys_haveHotKeyMapping`
+    /// が `KeyboardShortcut.Key` 全 case 分の register 成功を確認している。
     private static func hotKeyKey(for key: KeyboardShortcut.Key) -> Key {
         switch key {
         case .a: return .a
@@ -86,8 +87,8 @@ extension HotKeyHotkeyService {
     }
 
     /// Domain の `Modifiers` を AppKit の `NSEvent.ModifierFlags` に変換する。
-    /// HotKey は `[NSEvent.ModifierFlags]` 配列を受け取る API なので
-    /// reduce で合成して 1 つの `NSEvent.ModifierFlags` を返す。
+    /// `NSEvent.ModifierFlags` は OptionSet なので、`union` で個別 flag を
+    /// 1 つの値に合成する（`HotKey(key:modifiers:)` は OptionSet を期待）。
     private static func modifierFlags(for modifiers: KeyboardShortcut.Modifiers) -> NSEvent.ModifierFlags {
         let mapping: [(KeyboardShortcut.Modifiers, NSEvent.ModifierFlags)] = [
             (.command, .command),
