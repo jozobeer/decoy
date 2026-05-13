@@ -27,6 +27,13 @@ ignore:
   # authorization status の interrogation で構成。pure な認可分岐は
   # AVCameraSource.authorized(controller:status:) 経由でテスト済み
   - "Sources/AVCameraSource/AVCameraSource+Live.swift"
+  # AVFoundation 直結部分 ― AVCaptureDevice.authorizationStatus / requestAccess
+  # を呼ぶだけ。orchestrator 側（AVCameraPermission.swift）でカバー
+  - "Sources/AVCameraPermission/AVCaptureDeviceAuthorizationProvider.swift"
+  # AppKit (NSAlert / NSWorkspace) 直結部分 ― UI を出すだけでロジックなし
+  - "Sources/AVCameraPermission/AppKitCameraPermissionAlertPresenter.swift"
+  # live-wiring 専用 file ― live provider + live presenter を組み合わせるだけ
+  - "Sources/AVCameraPermission/AVCameraPermission+Live.swift"
   # Decoy は Orchestrator ― actor / dispatcher / view-model を組み立てる
   # 一段の wiring のみ。ロジックは MenuBarViewModel / AppCommandDispatcher
   # 側でテスト済みなので、ここはカバー対象外。

@@ -37,10 +37,26 @@ let package = Package(
                 "Recorder",
                 "Broadcaster",
                 "AppCommandDispatcher",
+                "AVCameraPermission",
                 "DependencyInjection",
                 "HotkeyService",
                 "MenuBarUI",
                 .product(name: "Dependencies", package: "swift-dependencies"),
+            ],
+            // `__TEXT,__info_plist` セクションに Info.plist を直接埋め込む。
+            // SPM の `executableTarget` は `.app` バンドルを生成しないので
+            // `resources: [.copy("Info.plist")]` だと `swift run` でも生成物の
+            // バイナリ単体でも Info.plist が読まれない。`-sectcreate` で
+            // バイナリの `__info_plist` セクションに直接埋めれば
+            // `[NSBundle mainBundle].infoDictionary` 経由で OS から見える ―
+            // `NSCameraUsageDescription` を OS の認可ダイアログが読みに来る経路。
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Decoy/Info.plist",
+                ]),
             ]
         ),
         .target(
@@ -90,6 +106,7 @@ let package = Package(
                 "InMemoryVirtualCameraSink",
                 "InMemoryCameraSource",
                 "AVCameraSource",
+                "AVCameraPermission",
                 "HotkeyService",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]

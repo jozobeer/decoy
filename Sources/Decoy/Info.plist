@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>beer.jozo.decoy</string>
+    <key>CFBundleName</key>
+    <string>Decoy</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Decoy はライブ配信中の自分の映像を録画し、必要なときに仮想カメラ経由で再生するためにカメラを使います。</string>
+</dict>
+</plist>

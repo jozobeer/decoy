@@ -1,11 +1,13 @@
 import AppCommandDispatcher
 import AppKit
+import AVCameraPermission
 import Broadcaster
 import Dependencies
 import DependencyInjection
 import Domain
 import HotkeyService
 import MenuBarUI
+import OSLog
 import Recorder
 import SwiftUI
 
@@ -35,6 +37,9 @@ struct DecoyApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @Dependency(\.hotkeyService) private var hotkeyService
+    @Dependency(\.cameraPermission) private var cameraPermission
+
+    private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AppDelegate")
 
     let recorder = Recorder()
     let broadcaster = Broadcaster()
@@ -46,6 +51,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // カメラ認可は最優先で取りに行く。CameraSource の live は `static let`
+        // (lazy) なので初参照まで評価されず、ここで permission を確保してから
+        // viewModel.start() を呼んでも順序は崩れない。失敗時は alert を見せた
+        // だけで黙って続行 ― ユーザーが後から設定を変えた場合に viewModel が
+        // 再評価できる余地を残す（live cameraSource は失敗時 InMemoryCameraSource
+        // に fallback するため crash はしない）。
+        Task { [cameraPermission] in
+            let result = await cameraPermission.ensureGranted()
+            guard case .failure(let error) = result else { return }
+            Self.logger.warning("camera permission unavailable: \(String(describing: error), privacy: .public)")
+        }
         let bindings = DefaultHotkeyBindings.all(recorder: recorder, dispatcher: dispatcher)
         Task { [hotkeyService] in
             for binding in bindings {
