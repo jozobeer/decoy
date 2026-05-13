@@ -197,16 +197,30 @@ struct FileSystemClipStoreTests {
 
     @Test func saveReplacement_thenCrashSimulated_stillHasPreviousData() async throws {
         // We can't actually simulate a crash mid-write, but we can verify
-        // there is no stray `.tmp` directory leaked at the root after a
+        // there is no leaked per-clip directory under `.staging/` after a
         // successful save (i.e. cleanup of the staging area happens on
         // commit). This is the operational guarantee callers rely on.
         let tmp = Self.makeTempRoot()
         let store = FileSystemClipStore(rootURL: tmp.url)
         let c = makeClip(frames: makeFrames(count: 5))
         try await store.save(c)
-        let contents = try FileManager.default.contentsOfDirectory(atPath: tmp.url.path)
-        let strayStaging = contents.filter { $0.hasPrefix(".tmp") || $0.hasPrefix("tmp-") }
-        #expect(strayStaging.isEmpty)
+        let stagingDir = tmp.url.appendingPathComponent(".staging", isDirectory: true)
+        let stagingContents = (try? FileManager.default.contentsOfDirectory(atPath: stagingDir.path)) ?? []
+        #expect(stagingContents.isEmpty, "staging area must be empty after a successful save, got: \(stagingContents)")
+    }
+
+    // MARK: - Filesystem precondition — root path collides with a file
+
+    @Test func save_throwsNotADirectory_whenRootPathIsAFile() async throws {
+        let parent = Self.makeTempRoot()
+        try FileManager.default.createDirectory(at: parent.url, withIntermediateDirectories: true)
+        let collidingRoot = parent.url.appendingPathComponent("clipstore-collision")
+        try Data("not a directory".utf8).write(to: collidingRoot)
+        let store = FileSystemClipStore(rootURL: collidingRoot)
+        let c = makeClip(frames: makeFrames(count: 1))
+        await #expect(throws: FileSystemClipStoreError.notADirectory(collidingRoot)) {
+            try await store.save(c)
+        }
     }
 
     // MARK: - Concurrency (actor must serialize)
@@ -220,12 +234,13 @@ struct FileSystemClipStoreTests {
                 frames: makeFrames(count: 2, payloadBase: UInt8(i))
             )
         }
-        await withTaskGroup(of: Void.self) { group in
+        try await withThrowingTaskGroup(of: Void.self) { group in
             for c in clips {
                 group.addTask {
-                    try? await store.save(c)
+                    try await store.save(c)
                 }
             }
+            try await group.waitForAll()
         }
         let all = try await store.all()
         #expect(all.count == clips.count)

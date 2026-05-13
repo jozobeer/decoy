@@ -10,8 +10,8 @@ import Domain
 ///   <clip-uuid>/
 ///     metadata.json     ← Codable header: id, recordedAt, duration, frame timings
 ///     frames/
-///       000.bin         ← raw Frame.data, zero-padded index
-///       001.bin
+///       000000.bin      ← raw Frame.data, 6-digit zero-padded index
+///       000001.bin
 ///       ...
 ///   .staging/           ← write-temp-then-rename area (auto-managed)
 ///     <clip-uuid>/      ← in-flight clip being staged
@@ -167,8 +167,13 @@ extension FileSystemClipStore {
     }
 
     private func ensureDirectoryExists(at url: URL) throws {
-        guard fileManager.fileExists(atPath: url.path) == false else { return }
-        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        var isDir: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
+        guard exists else {
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            return
+        }
+        guard isDir.boolValue else { throw FileSystemClipStoreError.notADirectory(url) }
     }
 
     private func removeIfExists(at url: URL) throws {
@@ -209,4 +214,11 @@ extension FileSystemClipStore {
 
 private func frameFilename(at index: Int) -> String {
     String(format: "%06d.bin", index)
+}
+
+// MARK: - Errors
+
+public enum FileSystemClipStoreError: Error, Sendable, Equatable {
+    /// A non-directory file exists at the expected directory path.
+    case notADirectory(URL)
 }
