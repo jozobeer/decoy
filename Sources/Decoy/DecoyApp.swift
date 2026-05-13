@@ -17,7 +17,7 @@ struct DecoyApp: App {
 /// SPM executables have no Info.plist to set `LSUIElement`, so the
 /// activation policy is flipped programmatically on launch.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
 }
