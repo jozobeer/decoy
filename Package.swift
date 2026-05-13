@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
+        .library(name: "MenuBarUI", targets: ["MenuBarUI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.12.0"),
@@ -37,7 +38,17 @@ let package = Package(
                 "AppCommandDispatcher",
                 "DependencyInjection",
                 "HotkeyService",
+                "MenuBarUI",
                 .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
+        .target(
+            name: "MenuBarUI",
+            dependencies: [
+                "Domain",
+                "Recorder",
+                "Broadcaster",
+                "AppCommandDispatcher",
             ]
         ),
         .target(name: "Domain"),
@@ -136,5 +147,22 @@ let package = Package(
         .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
         .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
+        .testTarget(
+            name: "MenuBarUITests",
+            dependencies: [
+                "MenuBarUI",
+                "Domain",
+                "Recorder",
+                "Broadcaster",
+                "AppCommandDispatcher",
+                "DependencyInjection",
+                "InMemoryCameraSource",
+                "InMemoryClipStore",
+                "InMemoryVirtualCameraSink",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+                .product(name: "Clocks", package: "swift-clocks"),
+                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
+            ]
+        ),
     ]
 )

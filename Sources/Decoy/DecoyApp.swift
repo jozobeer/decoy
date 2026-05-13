@@ -1,10 +1,11 @@
-import AppKit
 import AppCommandDispatcher
+import AppKit
 import Broadcaster
 import Dependencies
 import DependencyInjection
 import Domain
 import HotkeyService
+import MenuBarUI
 import Recorder
 import SwiftUI
 
@@ -13,8 +14,8 @@ struct DecoyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Decoy", systemImage: "video.circle") {
-            MenuView()
+        MenuBarExtra("Decoy", systemImage: appDelegate.viewModel.isRecording ? "video.circle.fill" : "video.circle") {
+            MenuView(viewModel: appDelegate.viewModel)
         }
         .menuBarExtraStyle(.window)
     }
@@ -24,27 +25,37 @@ struct DecoyApp: App {
 /// SPM executables have no Info.plist to set `LSUIElement`, so the
 /// activation policy is flipped programmatically on launch.
 ///
+/// Owns the single Recorder / Broadcaster / dispatcher graph so that
+/// global hotkeys と menu bar UI が同じ actor インスタンスへ dispatch
+/// する（コマンド経路を一本化）。
+///
 /// Global hotkey 4 つは起動時に `HotkeyService` へ register し、
-/// 終了時に `unregisterAll` で解放する。
-/// HotKey ライブラリは Carbon の `RegisterEventHotKey` 経由なので
-/// アクセシビリティ権限は不要。
+/// 終了時に `unregisterAll` で解放する。HotKey ライブラリは Carbon の
+/// `RegisterEventHotKey` 経由なのでアクセシビリティ権限は不要。
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @Dependency(\.hotkeyService) private var hotkeyService
 
-    private let recorder = Recorder()
-    private let broadcaster = Broadcaster()
+    let recorder = Recorder()
+    let broadcaster = Broadcaster()
+    lazy var dispatcher = AppCommandDispatcher(recorder: recorder, broadcaster: broadcaster)
+    lazy var viewModel = MenuBarViewModel(recorder: recorder, broadcaster: broadcaster, dispatcher: dispatcher)
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+    nonisolated func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let dispatcher = AppCommandDispatcher(recorder: recorder, broadcaster: broadcaster)
         let bindings = DefaultHotkeyBindings.all(recorder: recorder, dispatcher: dispatcher)
         Task { [hotkeyService] in
             for binding in bindings {
                 await hotkeyService.register(binding.shortcut, handler: binding.handler)
             }
+        }
+        Task { [viewModel] in
+            await viewModel.start()
         }
     }
 
@@ -56,25 +67,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { [hotkeyService] in
             await hotkeyService.unregisterAll()
         }
-    }
-}
-
-/// Placeholder menu content. Real status display lands in #29 (menu bar UI).
-private struct MenuView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Decoy")
-                .font(.headline)
-            Text("MVP scaffold — controls land in #29")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Divider()
-            Button("Quit Decoy") {
-                NSApp.terminate(nil)
-            }
-            .keyboardShortcut("q")
-        }
-        .padding(12)
-        .frame(width: 240)
     }
 }
