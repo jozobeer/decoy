@@ -9,10 +9,10 @@ import Domain
 /// する（NSEvent のグローバルモニタ系と違って `kAXTrustedCheckOptionPrompt`
 /// を要求しない）。Decoy のメニューバー常駐前提との相性がよい。
 ///
-/// 状態は `HotKey` インスタンスの配列で管理する。HotKey は ARC ベースの
-/// lifecycle（参照が落ちると自動でアンレジスタ）なので、`unregisterAll`
-/// は格納配列を空にするだけでよい。actor で状態を直列化し、`Sendable`
-/// 境界も自然に整う。
+/// 状態は `[KeyboardShortcut: HotKey]` 辞書（registry）で管理する。
+/// HotKey は ARC ベースの lifecycle（参照が落ちると自動でアンレジスタ）
+/// なので、`unregisterAll` は registry を空にするだけでよい。actor で
+/// 状態を直列化し、`Sendable` 境界も自然に整う。
 public actor HotKeyHotkeyService {
     /// 登録ショートカットの bookkeeping。
     /// `KeyboardShortcut` をキーにすることで同一ショートカットの再登録は
