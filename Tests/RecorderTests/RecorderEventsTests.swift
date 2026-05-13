@@ -494,6 +494,7 @@ extension FailingClipStore: ClipStore {
 
     func all() async throws -> [Clip] { [] }
     func clip(id: UUID) async throws -> Clip? { nil }
+    func delete(id: UUID) async throws {}
 }
 
 private struct TestError: Error, Equatable, Sendable {

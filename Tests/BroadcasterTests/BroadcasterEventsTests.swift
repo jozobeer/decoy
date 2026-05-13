@@ -704,6 +704,7 @@ extension FailingClipStore: ClipStore {
     func save(_ clip: Clip) async throws {}
     func all() async throws -> [Clip] { throw allError }
     func clip(id: UUID) async throws -> Clip? { nil }
+    func delete(id: UUID) async throws {}
 }
 
 /// CameraSource that emits preset frames then holds the stream open,

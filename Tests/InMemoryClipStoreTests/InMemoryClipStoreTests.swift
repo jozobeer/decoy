@@ -93,4 +93,42 @@ struct InMemoryClipStoreTests {
         let result = try await store.clip(id: UUID())
         #expect(result == nil)
     }
+
+    // MARK: - delete
+
+    @Test func deletedClip_isGoneFromAll() async throws {
+        let store = InMemoryClipStore()
+        let c = makeClip()
+        try await store.save(c)
+        try await store.delete(id: c.id)
+        let all = try await store.all()
+        #expect(all.isEmpty)
+    }
+
+    @Test func deletedClip_isNotFoundById() async throws {
+        let store = InMemoryClipStore()
+        let c = makeClip()
+        try await store.save(c)
+        try await store.delete(id: c.id)
+        let result = try await store.clip(id: c.id)
+        #expect(result == nil)
+    }
+
+    @Test func delete_unknownId_isIdempotent() async throws {
+        let store = InMemoryClipStore()
+        try await store.delete(id: UUID())
+        let all = try await store.all()
+        #expect(all.isEmpty)
+    }
+
+    @Test func delete_doesNotAffectOtherClips() async throws {
+        let store = InMemoryClipStore()
+        let keep = makeClip(recordedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let gone = makeClip(recordedAt: Date(timeIntervalSince1970: 1_700_000_005))
+        try await store.save(keep)
+        try await store.save(gone)
+        try await store.delete(id: gone.id)
+        let all = try await store.all()
+        #expect(all == [keep])
+    }
 }

@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "InMemoryClipStore", targets: ["InMemoryClipStore"]),
         .library(name: "InMemoryVirtualCameraSink", targets: ["InMemoryVirtualCameraSink"]),
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
+        .library(name: "FileSystemClipStore", targets: ["FileSystemClipStore"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
     ],
     dependencies: [
@@ -44,6 +45,7 @@ let package = Package(
         .target(name: "InMemoryClipStore", dependencies: ["Domain"]),
         .target(name: "InMemoryVirtualCameraSink", dependencies: ["Domain"]),
         .target(name: "InMemoryCameraSource", dependencies: ["Domain"]),
+        .target(name: "FileSystemClipStore", dependencies: ["Domain"]),
         .target(
             name: "DependencyInjection",
             dependencies: [
@@ -83,5 +85,6 @@ let package = Package(
         .testTarget(name: "InMemoryClipStoreTests", dependencies: ["InMemoryClipStore", "Domain"]),
         .testTarget(name: "InMemoryVirtualCameraSinkTests", dependencies: ["InMemoryVirtualCameraSink", "Domain"]),
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
+        .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
     ]
 )
