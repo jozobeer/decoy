@@ -17,4 +17,8 @@ public actor InMemoryClipStore: ClipStore {
     public func clip(id: UUID) async throws -> Clip? {
         clips[id]
     }
+
+    public func delete(id: UUID) async throws {
+        clips.removeValue(forKey: id)
+    }
 }
