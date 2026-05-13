@@ -41,10 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var dispatcher = AppCommandDispatcher(recorder: recorder, broadcaster: broadcaster)
     lazy var viewModel = MenuBarViewModel(recorder: recorder, broadcaster: broadcaster, dispatcher: dispatcher)
 
-    nonisolated func applicationWillFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated {
-            NSApp.setActivationPolicy(.accessory)
-        }
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
