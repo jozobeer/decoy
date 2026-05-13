@@ -26,8 +26,7 @@ struct AVCameraPermissionTests {
     func notDeterminedGrantedReturnsSuccess() async {
         let provider = FakeCameraAuthorizationProvider(
             status: .notDetermined,
-            grantOnRequest: true,
-            postRequestStatus: .authorized
+            grantOnRequest: true
         )
         let presenter = SpyCameraPermissionAlertPresenter()
         let sut = AVCameraPermission(provider: provider, alertPresenter: presenter)
@@ -44,8 +43,7 @@ struct AVCameraPermissionTests {
     func notDeterminedDeniedReturnsFailure() async {
         let provider = FakeCameraAuthorizationProvider(
             status: .notDetermined,
-            grantOnRequest: false,
-            postRequestStatus: .denied
+            grantOnRequest: false
         )
         let presenter = SpyCameraPermissionAlertPresenter()
         let sut = AVCameraPermission(provider: provider, alertPresenter: presenter)

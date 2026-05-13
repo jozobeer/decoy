@@ -37,12 +37,15 @@ let package = Package(
                 "Recorder",
                 "Broadcaster",
                 "AppCommandDispatcher",
-                "AVCameraPermission",
                 "DependencyInjection",
                 "HotkeyService",
                 "MenuBarUI",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ],
+            // Info.plist は SPM 的には resource ではなく linker に直接渡す
+            // 「ビルド資材」なので、target sources から除外して
+            // 「unhandled file」警告を抑える。
+            exclude: ["Info.plist"],
             // `__TEXT,__info_plist` セクションに Info.plist を直接埋め込む。
             // SPM の `executableTarget` は `.app` バンドルを生成しないので
             // `resources: [.copy("Info.plist")]` だと `swift run` でも生成物の

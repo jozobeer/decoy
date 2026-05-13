@@ -1,36 +1,26 @@
-import Foundation
 @testable import AVCameraPermission
 
 /// テスト用 `CameraAuthorizationProvider` 実装。
 ///
-/// `status` は外部から差し替え、`requestAccess()` 後に
-/// `postRequestStatus` で次回 `status` を変えられるようにしている
-/// （実機の挙動：notDetermined → requestAccess → authorized/denied）。
+/// 初期 `status` を外部から差し替えて分岐を切り替える。
+/// `requestAccess()` は事前指定した `grantOnRequest` の Bool を返すだけ ―
+/// orchestrator 側は requestAccess の Bool 結果だけで成否を決めている
+/// （`status` の再評価には依存しない）ので、fake にも status 遷移は不要。
 actor FakeCameraAuthorizationProvider: CameraAuthorizationProvider {
-    private var currentStatus: CameraAuthorizationStatus
-    private let postRequestStatus: CameraAuthorizationStatus?
+    let status: CameraAuthorizationStatus
     private let grantOnRequest: Bool
     private(set) var requestAccessCallCount: Int = 0
 
     init(
         status: CameraAuthorizationStatus,
-        grantOnRequest: Bool = false,
-        postRequestStatus: CameraAuthorizationStatus? = nil
+        grantOnRequest: Bool = false
     ) {
-        self.currentStatus = status
+        self.status = status
         self.grantOnRequest = grantOnRequest
-        self.postRequestStatus = postRequestStatus
-    }
-
-    var status: CameraAuthorizationStatus {
-        currentStatus
     }
 
     func requestAccess() async -> Bool {
         requestAccessCallCount += 1
-        if let next = postRequestStatus {
-            currentStatus = next
-        }
         return grantOnRequest
     }
 }
