@@ -19,14 +19,27 @@ let package = Package(
         .library(name: "AVCameraSource", targets: ["AVCameraSource"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
+        .library(name: "HotkeyService", targets: ["HotkeyService"]),
     ],
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.12.0"),
         .package(url: "https://github.com/pointfreeco/swift-clocks", from: "1.0.0"),
         .package(url: "https://github.com/pointfreeco/swift-concurrency-extras", from: "1.0.0"),
+        .package(url: "https://github.com/soffes/HotKey", from: "0.2.1"),
     ],
     targets: [
-        .executableTarget(name: "Decoy"),
+        .executableTarget(
+            name: "Decoy",
+            dependencies: [
+                "Domain",
+                "Recorder",
+                "Broadcaster",
+                "AppCommandDispatcher",
+                "DependencyInjection",
+                "HotkeyService",
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .target(name: "Domain"),
         .target(
             name: "Recorder",
@@ -50,6 +63,13 @@ let package = Package(
         .target(name: "FileSystemClipStore", dependencies: ["Domain"]),
         .target(name: "AVCameraSource", dependencies: ["Domain"]),
         .target(
+            name: "HotkeyService",
+            dependencies: [
+                "Domain",
+                .product(name: "HotKey", package: "HotKey"),
+            ]
+        ),
+        .target(
             name: "DependencyInjection",
             dependencies: [
                 "Domain",
@@ -57,6 +77,7 @@ let package = Package(
                 "InMemoryVirtualCameraSink",
                 "InMemoryCameraSource",
                 "AVCameraSource",
+                "HotkeyService",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
@@ -114,5 +135,6 @@ let package = Package(
         .testTarget(name: "InMemoryCameraSourceTests", dependencies: ["InMemoryCameraSource", "Domain"]),
         .testTarget(name: "FileSystemClipStoreTests", dependencies: ["FileSystemClipStore", "Domain"]),
         .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
+        .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
     ]
 )
