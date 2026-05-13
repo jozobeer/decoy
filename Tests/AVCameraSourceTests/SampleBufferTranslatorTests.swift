@@ -123,7 +123,7 @@ struct SampleBufferTranslatorTests {
     }
 
     @Test("frame(from:) returns nil when sample buffer carries no image buffer")
-    func translatorReturnsNilForBufferWithoutImage() {
+    func translatorReturnsNilForBufferWithoutImage() throws {
         // CMSampleBufferCreate without an image buffer = no image to read
         var sampleBuffer: CMSampleBuffer?
         let status = CMSampleBufferCreate(
@@ -141,8 +141,8 @@ struct SampleBufferTranslatorTests {
             sampleBufferOut: &sampleBuffer
         )
         #expect(status == noErr)
-        guard let sampleBuffer else { return }
-        #expect(frame(from: sampleBuffer) == nil)
+        let buffer = try #require(sampleBuffer)
+        #expect(frame(from: buffer) == nil)
     }
 
     @Test("frame(from:) preserves presentation time in seconds")

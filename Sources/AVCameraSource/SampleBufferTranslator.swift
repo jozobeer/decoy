@@ -60,8 +60,19 @@ private func packedPlane(
     let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex)
     let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex)
     let widthBytes = width * bytesPerPixel
-    return (0..<rows).reduce(into: Data(capacity: rows * widthBytes)) { acc, row in
-        let rowPtr = base.advanced(by: row * rowBytes)
-        acc.append(Data(bytes: rowPtr, count: widthBytes))
+    // Single allocation of the full packed plane, then copy each row's
+    // payload (stripping padding) directly into the buffer. The
+    // previous reduce(into:) variant allocated a temporary `Data` per
+    // row — at 30 fps with a 1080p Y plane that's 1080 allocations per
+    // frame, ~32400/s, which dominated translator cost.
+    var packed = Data(count: rows * widthBytes)
+    packed.withUnsafeMutableBytes { dst in
+        guard let dstBase = dst.baseAddress else { return }
+        (0..<rows).forEach { row in
+            let src = base.advanced(by: row * rowBytes)
+            let dstRow = dstBase.advanced(by: row * widthBytes)
+            memcpy(dstRow, src, widthBytes)
+        }
     }
+    return packed
 }

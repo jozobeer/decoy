@@ -14,6 +14,12 @@ import Domain
 ///   subscriber sees every frame from its subscription onward. Frames
 ///   that arrive before any subscriber exists are dropped (the session
 ///   is not running yet anyway).
+/// - Lifecycle is tracked by an explicit three-state machine
+///   (`.idle` / `.running` / `.stopping`) so a new subscription cannot
+///   race with an in-flight `controller.stop()`. While stopping, new
+///   subscribers register their continuation but do not trigger a
+///   restart; once the stop completes, the cleanup hook checks for
+///   late arrivals and restarts the controller if any are waiting.
 ///
 /// Authorization:
 /// - The protocol's `frames()` cannot throw, so permission must be
@@ -25,7 +31,17 @@ import Domain
 public actor AVCameraSource {
     private let controller: any CaptureSessionController
     private var subscribers: [UUID: AsyncStream<Frame>.Continuation] = [:]
-    private var running = false
+    private var lifecycle: LifecycleState = .idle
+
+    /// Bounded buffer per subscriber. Cameras run at ~30–60 fps; under
+    /// momentary consumer lag we tolerate a short queue (~quarter
+    /// second at 30 fps) and beyond that drop the oldest frames so
+    /// memory does not grow unboundedly. The alternative — pausing the
+    /// producer — would back-pressure AVFoundation, which is not what
+    /// callers want for a live feed. Dropped frames are silent at this
+    /// layer; consumers that need rate stats should observe their own
+    /// timestamps.
+    static let perSubscriberBufferDepth = 8
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AVCameraSource")
     /// NV12 (`420YpCbCr8BiPlanarVideoRange`) — chosen so the buffer is
@@ -35,6 +51,10 @@ public actor AVCameraSource {
 
     public init(controller: any CaptureSessionController) {
         self.controller = controller
+    }
+
+    enum LifecycleState {
+        case idle, running, stopping
     }
 }
 
@@ -64,7 +84,10 @@ public extension AVCameraSource {
 
 extension AVCameraSource: CameraSource {
     public func frames() async -> AsyncStream<Frame> {
-        let (stream, continuation) = AsyncStream.makeStream(of: Frame.self)
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: Frame.self,
+            bufferingPolicy: .bufferingNewest(Self.perSubscriberBufferDepth)
+        )
         let id = UUID()
         subscribers[id] = continuation
         continuation.onTermination = { [weak self] _ in
@@ -77,10 +100,13 @@ extension AVCameraSource: CameraSource {
 
 extension AVCameraSource {
     /// Start the controller on the first subscriber. Subsequent
-    /// subscriptions short-circuit because `running` is already true.
+    /// subscriptions short-circuit because `lifecycle` is already
+    /// `.running`. Calls during `.stopping` short-circuit too — the
+    /// subscriber's continuation is registered, and the stop completion
+    /// path picks it up and restarts.
     private func ensureStarted() async {
-        guard !running else { return }
-        running = true
+        guard lifecycle == .idle else { return }
+        lifecycle = .running
         do {
             try await controller.start(
                 pixelFormat: Self.pixelFormat,
@@ -88,13 +114,18 @@ extension AVCameraSource {
                     Task { await self?.broadcast(frame) }
                 },
                 onStop: { [weak self] in
-                    Task { await self?.terminate() }
+                    Task { await self?.handleControllerStopped() }
                 }
             )
         } catch {
             Self.logger.error("CaptureSessionController.start failed: \(error.localizedDescription, privacy: .private)")
-            running = false
-            terminate()
+            // Roll back any partial controller state before tearing down
+            // subscribers; AVFoundation may have set up resources before
+            // throwing and leaving them attached can poison the next
+            // start attempt.
+            await controller.stop()
+            lifecycle = .idle
+            terminateAllSubscribers()
         }
     }
 
@@ -109,23 +140,35 @@ extension AVCameraSource {
         terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
-    /// Finish every subscriber's stream and reset to the not-running
-    /// state. Called when the underlying controller signals stop, or
-    /// when start() fails.
-    private func terminate() {
+    /// `onStop` from the controller fires only on unexpected end (device
+    /// disconnect, runtime error). Expected stops triggered by
+    /// `removeSubscriber` set `lifecycle = .stopping` first and consume
+    /// the signal silently — we don't want them to terminate subscribers
+    /// that arrived during the stop window.
+    private func handleControllerStopped() {
+        guard lifecycle == .running else { return }
+        terminateAllSubscribers()
+        lifecycle = .idle
+    }
+
+    private func terminateAllSubscribers() {
         let snapshot = subscribers
         subscribers.removeAll()
         snapshot.values.forEach { $0.finish() }
-        running = false
     }
 
-    /// Subscriber cleanup hook fired by `onTermination`. When the
-    /// last subscriber drops, stop the underlying controller so we
-    /// release the camera.
+    /// Subscriber cleanup hook fired by `onTermination`. When the last
+    /// subscriber drops, stop the underlying controller so we release
+    /// the camera. New subscribers that arrive during the stop are
+    /// tolerated: after `controller.stop()` returns we re-check and
+    /// restart if any are waiting.
     private func removeSubscriber(id: UUID) async {
         subscribers.removeValue(forKey: id)
-        guard subscribers.isEmpty, running else { return }
-        running = false
+        guard subscribers.isEmpty, lifecycle == .running else { return }
+        lifecycle = .stopping
         await controller.stop()
+        lifecycle = .idle
+        guard !subscribers.isEmpty else { return }
+        await ensureStarted()
     }
 }

@@ -49,12 +49,12 @@ struct AVCameraSourceTests {
             let stream = await source.frames()
             for await _ in stream {}
         }
-        // let the subscribe + start hop complete
-        try? await Task.sleep(for: .milliseconds(20))
+        // wait for the subscribe + start hop to land deterministically
+        await controller.awaitStartCount(1)
         task.cancel()
         _ = await task.value
-        // let the actor observe onTermination and call stop()
-        try? await Task.sleep(for: .milliseconds(20))
+        // wait for onTermination → removeSubscriber → controller.stop()
+        await controller.awaitStopCount(1)
         let stopped = await controller.stopCount
         #expect(stopped == 1)
     }
@@ -102,20 +102,24 @@ struct AVCameraSourceTests {
             let stream = await source.frames()
             for await _ in stream {}
         }
-        try? await Task.sleep(for: .milliseconds(20))
+        // both subscriptions landed → controller started (only once)
+        await controller.awaitStartCount(1)
 
         // cancel only the first subscriber — controller must still be
         // alive because the second subscriber is still iterating
         task1.cancel()
         _ = await task1.value
-        try? await Task.sleep(for: .milliseconds(20))
+        // Yield enough times that any (erroneous) stop call would land;
+        // since no stop is expected, awaitStopCount falls through after
+        // its bounded poll window without setting the counter.
+        await controller.awaitStopCount(1)
         let stoppedAfterFirst = await controller.stopCount
         #expect(stoppedAfterFirst == 0)
 
         // cancel the second — now the controller should stop
         task2.cancel()
         _ = await task2.value
-        try? await Task.sleep(for: .milliseconds(20))
+        await controller.awaitStopCount(1)
         let stoppedAfterSecond = await controller.stopCount
         #expect(stoppedAfterSecond == 1)
     }
