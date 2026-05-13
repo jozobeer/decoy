@@ -128,15 +128,24 @@ struct AppCommandDispatcherTests {
         }
     }
 
-    // MARK: - Fan-out integrity
+    // MARK: - Fan-out across commands (both sides reachable through one dispatcher)
 
-    /// Verify that a single `dispatch` reliably delivers the command to
-    /// **both** actors before returning — the structural guarantee of
-    /// `async let r`/`async let b`. We exercise a command that produces
-    /// observable side effects on both sides at once: chain a recording
-    /// (Recorder side effect) with a decoy-mode change (Broadcaster side
-    /// effect) and assert both landed.
-    @Test func dispatch_fansOutToBothActorsBeforeReturning() async throws {
+    /// End-to-end smoke covering both sides of the fan-out across a
+    /// command sequence: a Recorder-routed pair (`.startRecording` +
+    /// `.stopRecording`) lands a clip in the store, and a
+    /// Broadcaster-routed command (`.startDecoy`) lands a state change.
+    /// Both side effects are observable through the same dispatcher
+    /// instance, which is what the dispatcher promises to its callers.
+    ///
+    /// Note on the structural "both handles awaited per single dispatch"
+    /// guarantee: that lives in the `async let r` / `async let b` /
+    /// `await (r, b)` shape inside `dispatch`. Asserting it directly from
+    /// outside the dispatcher requires protocol abstractions over
+    /// `Recorder` / `Broadcaster` so test spies can record their `handle`
+    /// invocations; both types are currently concrete. That refactor is
+    /// out of scope for #28 and would push the dispatcher to depend on
+    /// protocols just for testability without a runtime caller.
+    @Test func dispatch_acrossCommands_drivesBothRecorderAndBroadcasterSideEffects() async throws {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
         try await withDependencies {
@@ -195,7 +204,7 @@ extension AppCommandDispatcherTests {
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
             $0.continuousClock = ImmediateClock()
-            $0.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
+            $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
             try await operation()
