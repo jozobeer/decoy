@@ -1,5 +1,5 @@
 {
-  "originHash" : "1f2c5c07073aaf76770750f307ed0a6421f9d4cf925e1dfdba18ba3b21a1a623",
+  "originHash" : "791548b23c413082d2195b466f890936c38e70345426b7c67d5d2f22bc6b6fe6",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "dcccb979a2183b8df3334237e3dc1ae2b4116a86",
         "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "hotkey",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/soffes/HotKey",
+      "state" : {
+        "revision" : "a3cf605d7a96f6ff50e04fcb6dea6e2613cfcbe4",
+        "version" : "0.2.1"
       }
     },
     {
