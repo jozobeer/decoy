@@ -32,7 +32,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-15 image は Xcode 16+ が default。xcodegen 2.45 が
+    # objectVersion 77 (Xcode 16+ 必須) で project.pbxproj を吐くため、
+    # macos-14 (Xcode 15.4 default) では project が開けず build が落ちる。
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
