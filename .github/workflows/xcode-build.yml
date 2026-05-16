@@ -1,0 +1,54 @@
+name: Xcode Build
+
+# Decoy.app の Xcode build を PR ごとに検証する。
+# - .xcodeproj は xcodegen で project.yml から再生成
+# - PR では unsigned build only。signing/notarization は release tag の別 workflow で
+# - SPM (`swift build` / `swift test`) は別 workflow が担当
+#
+# Security note: 外部入力 (PR title / body / commit message 等) を一切使わないため
+# command injection の余地なし。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - project.yml
+      - Apps/**
+      - Sources/**
+      - Package.swift
+      - Package.resolved
+      - .github/workflows/xcode-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Decoy.xcodeproj
+        run: xcodegen generate
+
+      - name: Resolve SPM dependencies
+        run: xcodebuild -resolvePackageDependencies -project Decoy.xcodeproj
+
+      - name: Build Decoy.app (unsigned)
+        run: |
+          xcodebuild build \
+            -project Decoy.xcodeproj \
+            -scheme Decoy \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""

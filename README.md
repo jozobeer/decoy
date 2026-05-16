@@ -59,11 +59,24 @@ flowchart LR
 
 TDD で進める。詳細は [`.claude/CLAUDE.md`](./.claude/CLAUDE.md)。
 
+### SPM (lib targets / tests)
+
 ```sh
-xcodebuild -resolvePackageDependencies -project Decoy.xcodeproj
-xcodebuild test -scheme Decoy -destination 'platform=macOS'
+swift build
+swift test
+```
+
+### Xcode (Decoy.app / SystemExtension bundle)
+
+`Decoy.xcodeproj` は [xcodegen](https://github.com/yonaskolb/XcodeGen) で `project.yml` から生成する。`.xcodeproj` 自体は gitignore されていて、source of truth は `project.yml`。
+
+```sh
+brew install xcodegen   # 初回のみ
+xcodegen generate       # project.yml → Decoy.xcodeproj
 xed .
 ```
+
+CI でも同じ手順で再生 → `xcodebuild build`。署名は release tag workflow で別途。
 
 ---
 
