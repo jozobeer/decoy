@@ -21,6 +21,12 @@ on:
       - .github/workflows/xcode-build.yml
   workflow_dispatch:
 
+# 同一 PR / branch で連続 push されたとき、古い build を打ち切る。
+# macOS runner は遅くて高コストなので、最新コミットのみを保証する。
+concurrency:
+  group: xcode-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -30,8 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      # Xcode は runner image のデフォルトを利用 ― 明示 pin は image rotation で
+      # 容易に壊れる。floor は macOS 14 (deploymentTarget) で project.yml が要求する。
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -39,8 +45,8 @@ jobs:
       - name: Generate Decoy.xcodeproj
         run: xcodegen generate
 
-      - name: Resolve SPM dependencies
-        run: xcodebuild -resolvePackageDependencies -project Decoy.xcodeproj
+      # `xcodebuild build` は package graph を自動解決するため、`-resolvePackageDependencies`
+      # は冗長。失敗を別 step として surface したい場合のみ復活させる。
 
       - name: Build Decoy.app (unsigned)
         run: |

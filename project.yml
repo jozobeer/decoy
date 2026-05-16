@@ -51,9 +51,9 @@ targets:
         INFOPLIST_FILE: Sources/Decoy/Info.plist
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: Apps/Decoy/Decoy.entitlements
-        CODE_SIGN_STYLE: Automatic
-        # PR CI では unsigned build only ― DEVELOPMENT_TEAM は
-        # release tag workflow で inject する。
+        # CODE_SIGN_STYLE は Manual ― CODE_SIGN_IDENTITY="-" (ad-hoc) と整合する。
+        # release tag workflow では Automatic + DEVELOPMENT_TEAM を inject して上書き。
+        CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
