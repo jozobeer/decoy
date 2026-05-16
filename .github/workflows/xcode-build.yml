@@ -1,0 +1,63 @@
+name: Xcode Build
+
+# Decoy.app の Xcode build を PR ごとに検証する。
+# - .xcodeproj は xcodegen で project.yml から再生成
+# - PR では unsigned build only。signing/notarization は release tag の別 workflow で
+# - SPM (`swift build` / `swift test`) は別 workflow が担当
+#
+# Security note: 外部入力 (PR title / body / commit message 等) を一切使わないため
+# command injection の余地なし。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - project.yml
+      - Apps/**
+      - Sources/**
+      - Package.swift
+      - Package.resolved
+      - .github/workflows/xcode-build.yml
+  workflow_dispatch:
+
+# 同一 PR / branch で連続 push されたとき、古い build を打ち切る。
+# macOS runner は遅くて高コストなので、最新コミットのみを保証する。
+concurrency:
+  group: xcode-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # macos-15 image は Xcode 16+ が default。xcodegen 2.45 が
+    # objectVersion 77 (Xcode 16+ 必須) で project.pbxproj を吐くため、
+    # macos-14 (Xcode 15.4 default) では project が開けず build が落ちる。
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Xcode は runner image のデフォルトを利用 ― 明示 pin は image rotation で
+      # 容易に壊れる。floor は macOS 14 (deploymentTarget) で project.yml が要求する。
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Decoy.xcodeproj
+        run: xcodegen generate
+
+      # `xcodebuild build` は package graph を自動解決するため、`-resolvePackageDependencies`
+      # は冗長。失敗を別 step として surface したい場合のみ復活させる。
+
+      - name: Build Decoy.app (unsigned)
+        run: |
+          xcodebuild build \
+            -project Decoy.xcodeproj \
+            -scheme Decoy \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
