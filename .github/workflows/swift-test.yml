@@ -32,6 +32,10 @@ permissions:
 jobs:
   test:
     runs-on: macos-15
+    # 通常 207 tests が 2s 弱 / 単体 PR でも 10 分以内に CI が完走する前提。
+    # 20 分超で hang を疑って run を打ち切り、cooperative thread pool starvation
+    # など再発防止しづらい silent hang を顕在化させる (#54 参照)。
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +44,11 @@ jobs:
       # が macos-15 image の default。
 
       - name: Run tests with coverage
-        run: swift test --enable-code-coverage --parallel
+        # `--no-parallel` 必須。swift-testing の並列実行は actor + megaYield
+        # ループが多数走ると cooperative thread pool を飽和させて silent hang
+        # する (#54 で再現確認 ― 単体実行は <2s)。並列化のメリットはほぼゼロ、
+        # リスクだけが残る。
+        run: swift test --enable-code-coverage --no-parallel
 
       - name: Export lcov
         # SPM 6.0+ は test target を 1 つの `<Pkg>PackageTests.xctest` に集約する
