@@ -1,3 +1,5 @@
+import Dependencies
+
 /// CMIO Camera Extension の install 状態を駆動する port。
 ///
 /// 役割：
@@ -33,4 +35,30 @@ public enum CameraExtensionInstallStatus: Sendable, Equatable {
     case needsApproval
     /// install 完了 ― 外部アプリ (Zoom 等) から「Decoy」が選べる。
     case installed
+}
+
+public enum CameraExtensionInstallerKey: TestDependencyKey {
+    public static let testValue: any CameraExtensionInstaller = UnimplementedCameraExtensionInstaller()
+}
+
+extension DependencyValues {
+    public var cameraExtensionInstaller: any CameraExtensionInstaller {
+        get { self[CameraExtensionInstallerKey.self] }
+        set { self[CameraExtensionInstallerKey.self] = newValue }
+    }
+}
+
+private struct UnimplementedCameraExtensionInstaller: CameraExtensionInstaller {
+    var status: AsyncStream<CameraExtensionInstallStatus> {
+        get async {
+            reportIssue(#"@Dependency(\.cameraExtensionInstaller)"#)
+            return AsyncStream { $0.finish() }
+        }
+    }
+    func activate() async {
+        reportIssue(#"@Dependency(\.cameraExtensionInstaller)"#)
+    }
+    func deactivate() async {
+        reportIssue(#"@Dependency(\.cameraExtensionInstaller)"#)
+    }
 }

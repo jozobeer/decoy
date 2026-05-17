@@ -1,3 +1,5 @@
+import Dependencies
+
 /// グローバルキーボードショートカットを登録・解除する port。
 ///
 /// 役割は「`KeyboardShortcut` が押されたら受け取ったハンドラを発火する」
@@ -28,4 +30,30 @@ public protocol HotkeyService: Sendable {
     /// 現在登録されているショートカットの数。
     /// テストおよび lifecycle 検証のための観測点。
     var registeredCount: Int { get async }
+}
+
+public enum HotkeyServiceKey: TestDependencyKey {
+    public static let testValue: any HotkeyService = UnimplementedHotkeyService()
+}
+
+extension DependencyValues {
+    public var hotkeyService: any HotkeyService {
+        get { self[HotkeyServiceKey.self] }
+        set { self[HotkeyServiceKey.self] = newValue }
+    }
+}
+
+private struct UnimplementedHotkeyService: HotkeyService {
+    func register(_ shortcut: KeyboardShortcut, handler: @Sendable @escaping () async -> Void) async {
+        reportIssue(#"@Dependency(\.hotkeyService)"#)
+    }
+    func unregisterAll() async {
+        reportIssue(#"@Dependency(\.hotkeyService)"#)
+    }
+    var registeredCount: Int {
+        get async {
+            reportIssue(#"@Dependency(\.hotkeyService)"#)
+            return 0
+        }
+    }
 }
