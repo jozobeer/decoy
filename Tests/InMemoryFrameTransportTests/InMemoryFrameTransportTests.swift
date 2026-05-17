@@ -54,11 +54,11 @@ struct InMemoryFrameTransportTests {
         }
     }
 
-    @Test func send_afterDisconnect_throwsNotConnected() async throws {
+    @Test func send_afterDisconnect_throwsDisconnectedDuringSend() async throws {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
         await transport.disconnect()
-        await #expect(throws: FrameTransportError.notConnected) {
+        await #expect(throws: FrameTransportError.disconnectedDuringSend) {
             try await transport.send(frame(t: 1, label: "a"))
         }
     }

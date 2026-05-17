@@ -12,6 +12,9 @@ import Foundation
 public actor InMemoryFrameTransport {
     public private(set) var sentFrames: [Frame] = []
     public private(set) var isConnected: Bool = false
+    /// `connect()` が一度でも成功したかを保持する。`disconnect()` 後の
+    /// `send(_:)` を `.disconnectedDuringSend` として区別するために使う。
+    public private(set) var wasConnected: Bool = false
 
     private var continuations: [UUID: AsyncStream<FrameTransportEvent>.Continuation] = [:]
     private var currentState: FrameTransportEvent = .disconnected
@@ -35,6 +38,7 @@ extension InMemoryFrameTransport: FrameTransport {
     public func connect() async throws {
         guard !isConnected else { return }
         isConnected = true
+        wasConnected = true
         emit(.connected)
     }
 
@@ -45,7 +49,9 @@ extension InMemoryFrameTransport: FrameTransport {
     }
 
     public func send(_ frame: Frame) async throws {
-        guard isConnected else { throw FrameTransportError.notConnected }
+        guard isConnected else {
+            throw wasConnected ? FrameTransportError.disconnectedDuringSend : FrameTransportError.notConnected
+        }
         sentFrames.append(frame)
     }
 }

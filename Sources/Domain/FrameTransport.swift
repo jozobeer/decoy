@@ -42,9 +42,12 @@ public enum FrameTransportEvent: Sendable, Equatable {
 
 /// `FrameTransport` の操作で起きうるエラー。
 public enum FrameTransportError: Error, Equatable, Sendable {
-    /// `connect()` 前に `send(_:)` を呼んだ。
+    /// 一度も `connect()` を呼んでいない状態で `send(_:)` を呼んだ。
     case notConnected
-    /// `disconnect()` 後に `send(_:)` を呼んだ。
+    /// `connect()` → `disconnect()` の後に `send(_:)` を呼んだ。
+    /// caller は「接続が切れた」と「まだ接続していない」を区別できる ―
+    /// Mach port impl でも extension 側がクラッシュした場合は本ケースに
+    /// 寄せる (extension 側 down → host の send が落ちる経路)。
     case disconnectedDuringSend
     /// IPC 層 (Mach port / IOSurface) でのエラー。
     case transport(reason: String)
