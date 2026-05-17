@@ -10,6 +10,7 @@
 *.swo
 *~
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Env / secrets
 .env
