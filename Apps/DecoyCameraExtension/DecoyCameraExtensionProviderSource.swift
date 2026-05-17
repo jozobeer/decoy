@@ -7,13 +7,13 @@ import Foundation
 /// 公開する。Decoy では「Decoy」という名前の virtual camera device を
 /// ひとつだけ公開する。
 final class DecoyCameraExtensionProviderSource: NSObject, CMIOExtensionProviderSource {
-    private(set) var provider: CMIOExtensionProvider!
-    private let deviceSource: DecoyCameraExtensionDeviceSource
+    private(set) lazy var provider: CMIOExtensionProvider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
+    private let clientQueue: DispatchQueue?
+    private let deviceSource = DecoyCameraExtensionDeviceSource(localizedName: "Decoy")
 
     init(clientQueue: DispatchQueue?) {
-        deviceSource = DecoyCameraExtensionDeviceSource(localizedName: "Decoy")
+        self.clientQueue = clientQueue
         super.init()
-        provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
         do {
             try provider.addDevice(deviceSource.device)
         } catch {

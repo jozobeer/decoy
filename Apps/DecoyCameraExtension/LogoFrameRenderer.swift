@@ -14,6 +14,8 @@ final class LogoFrameRenderer {
     private let height: Int
     private let pixelBufferPool: CVPixelBufferPool
     private let cachedImage: CGImage
+    private let colorSpace = CGColorSpaceCreateDeviceRGB()
+    private let cachedFormatDescription: CMFormatDescription
 
     init(width: Int, height: Int) {
         self.width = width
@@ -32,6 +34,7 @@ final class LogoFrameRenderer {
         pixelBufferPool = pool
 
         cachedImage = LogoFrameRenderer.renderLogo(width: width, height: height)
+        cachedFormatDescription = LogoFrameRenderer.formatDescription(width: width, height: height)
     }
 
     func nextFrame() -> CVPixelBuffer? {
@@ -50,12 +53,34 @@ final class LogoFrameRenderer {
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else { return nil }
 
         context.draw(cachedImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         return pixelBuffer
+    }
+
+    func sampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 30),
+            presentationTimeStamp: now,
+            decodeTimeStamp: .invalid
+        )
+
+        var sampleBuffer: CMSampleBuffer?
+        CMSampleBufferCreateForImageBuffer(
+            allocator: nil,
+            imageBuffer: pixelBuffer,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: cachedFormatDescription,
+            sampleTiming: &timing,
+            sampleBufferOut: &sampleBuffer
+        )
+        return sampleBuffer
     }
 }
 
@@ -72,36 +97,6 @@ extension LogoFrameRenderer {
         )
         guard let description else { fatalError("Failed to create CMFormatDescription") }
         return description
-    }
-
-    static func sampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
-        var formatDescription: CMFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(
-            allocator: nil,
-            imageBuffer: pixelBuffer,
-            formatDescriptionOut: &formatDescription
-        )
-        guard let formatDescription else { return nil }
-
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-        var timing = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: 30),
-            presentationTimeStamp: now,
-            decodeTimeStamp: .invalid
-        )
-
-        var sampleBuffer: CMSampleBuffer?
-        CMSampleBufferCreateForImageBuffer(
-            allocator: nil,
-            imageBuffer: pixelBuffer,
-            dataReady: true,
-            makeDataReadyCallback: nil,
-            refcon: nil,
-            formatDescription: formatDescription,
-            sampleTiming: &timing,
-            sampleBufferOut: &sampleBuffer
-        )
-        return sampleBuffer
     }
 
     private static func renderLogo(width: Int, height: Int) -> CGImage {

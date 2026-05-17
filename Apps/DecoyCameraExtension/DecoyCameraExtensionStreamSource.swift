@@ -11,8 +11,13 @@ import Foundation
 /// IPC で host からの frame を受け取る変更は #43 で追加 ― 本 issue では
 /// extension 単独で動くテストパターン出力に scope を絞る。
 final class DecoyCameraExtensionStreamSource: NSObject, CMIOExtensionStreamSource {
-    private(set) var stream: CMIOExtensionStream!
-    private weak var owningDevice: CMIOExtensionDevice?
+    private(set) lazy var stream: CMIOExtensionStream = CMIOExtensionStream(
+        localizedName: "Decoy",
+        streamID: UUID(),
+        direction: .source,
+        clockType: .hostTime,
+        source: self
+    )
     private let renderer = LogoFrameRenderer(width: 1280, height: 720)
     private let timerQueue = DispatchQueue(label: "beer.jozo.decoy.CameraExtension.timer", qos: .userInteractive)
     private var timer: DispatchSourceTimer?
@@ -26,18 +31,6 @@ final class DecoyCameraExtensionStreamSource: NSObject, CMIOExtensionStreamSourc
             validFrameDurations: [CMTime(value: 1, timescale: 30)]
         )
         super.init()
-    }
-
-    func bind(to device: CMIOExtensionDevice) {
-        owningDevice = device
-        let streamID = UUID()
-        stream = CMIOExtensionStream(
-            localizedName: "Decoy",
-            streamID: streamID,
-            direction: .source,
-            clockType: .hostTime,
-            source: self
-        )
     }
 
     var formats: [CMIOExtensionStreamFormat] { [format] }
@@ -63,7 +56,7 @@ final class DecoyCameraExtensionStreamSource: NSObject, CMIOExtensionStreamSourc
 
     func startStream() throws {
         let timer = DispatchSource.makeTimerSource(queue: timerQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(33), leeway: .milliseconds(5))
+        timer.schedule(deadline: .now(), repeating: .nanoseconds(33_333_333), leeway: .milliseconds(5))
         timer.setEventHandler { [weak self] in
             self?.emitFrame()
         }
@@ -79,9 +72,8 @@ final class DecoyCameraExtensionStreamSource: NSObject, CMIOExtensionStreamSourc
 
 extension DecoyCameraExtensionStreamSource {
     private func emitFrame() {
-        guard let stream else { return }
         guard let pixelBuffer = renderer.nextFrame() else { return }
-        guard let sampleBuffer = LogoFrameRenderer.sampleBuffer(from: pixelBuffer) else { return }
+        guard let sampleBuffer = renderer.sampleBuffer(from: pixelBuffer) else { return }
         stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: 0)
     }
 }
