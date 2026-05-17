@@ -32,6 +32,20 @@ public actor AVCameraSource {
     private let controller: any CaptureSessionController
     private var subscribers: [UUID: AsyncStream<Frame>.Continuation] = [:]
     private var lifecycle: LifecycleState = .idle
+    /// Single-consumer pipe between the controller's frame callback and
+    /// the actor's `broadcast(_:)`. Using one ordered `AsyncStream`
+    /// instead of a `Task { … }` per frame guarantees frames reach
+    /// subscribers in the order the controller emitted them — without
+    /// it, concurrent unstructured Tasks racing into the actor reorder
+    /// frames whenever the producer outpaces actor scheduling.
+    private var inboundContinuation: AsyncStream<Frame>.Continuation?
+    private var consumer: Task<Void, Never>?
+    /// Set true when entering `.stopping` due to an unexpected controller
+    /// stop (device disconnect, runtime error). The consumer-completion
+    /// hook then terminates subscribers as part of cleanup. For planned
+    /// stops triggered by `removeSubscriber` we leave this `false` so
+    /// late-arriving subscribers can drive a restart.
+    private var terminateOnDrain = false
 
     /// Bounded buffer per subscriber. Cameras run at ~30–60 fps; under
     /// momentary consumer lag we tolerate a short queue (~quarter
@@ -107,11 +121,27 @@ extension AVCameraSource {
     private func ensureStarted() async {
         guard lifecycle == .idle else { return }
         lifecycle = .running
+        // Bounded inbound buffer mirrors `perSubscriberBufferDepth`: under
+        // momentary consumer lag we tolerate a short queue and beyond
+        // that drop the oldest frame so memory stays flat. Unbounded
+        // would let AVFoundation's producer outpace our actor hop and
+        // grow without limit.
+        let (inbound, continuation) = AsyncStream.makeStream(
+            of: Frame.self,
+            bufferingPolicy: .bufferingNewest(Self.perSubscriberBufferDepth)
+        )
+        inboundContinuation = continuation
+        consumer = Task { [weak self] in
+            for await frame in inbound {
+                await self?.broadcast(frame)
+            }
+            await self?.consumerFinished()
+        }
         do {
             try await controller.start(
                 pixelFormat: Self.pixelFormat,
-                onFrame: { [weak self] frame in
-                    Task { await self?.broadcast(frame) }
+                onFrame: { frame in
+                    continuation.yield(frame)
                 },
                 onStop: { [weak self] in
                     Task { await self?.handleControllerStopped() }
@@ -119,13 +149,20 @@ extension AVCameraSource {
             )
         } catch {
             Self.logger.error("CaptureSessionController.start failed: \(error.localizedDescription, privacy: .private)")
-            // Roll back any partial controller state before tearing down
-            // subscribers; AVFoundation may have set up resources before
-            // throwing and leaving them attached can poison the next
-            // start attempt.
+            // Pre-stage the drain transition BEFORE awaiting `stop()`.
+            // `controller.stop()` may invoke its `onStop` callback while
+            // we are suspended here, scheduling `handleControllerStopped`
+            // — without `lifecycle = .stopping` in place, the racing
+            // handler's `guard lifecycle == .running` would re-enter the
+            // drain and `consumerFinished` could land before this catch
+            // body resumes, leaving the actor wedged in `.stopping` with
+            // `consumer == nil`. Staging the transition first makes the
+            // racing handler short-circuit.
+            lifecycle = .stopping
+            terminateOnDrain = true
+            inboundContinuation?.finish()
+            inboundContinuation = nil
             await controller.stop()
-            lifecycle = .idle
-            terminateAllSubscribers()
         }
     }
 
@@ -140,15 +177,35 @@ extension AVCameraSource {
         terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
-    /// `onStop` from the controller fires only on unexpected end (device
-    /// disconnect, runtime error). Expected stops triggered by
-    /// `removeSubscriber` set `lifecycle = .stopping` first and consume
-    /// the signal silently — we don't want them to terminate subscribers
-    /// that arrived during the stop window.
+    /// `onStop` from the controller fires when the underlying session
+    /// ends unexpectedly (device disconnect, runtime error). Planned
+    /// stops triggered by `removeSubscriber` already set `.stopping`
+    /// and finish the inbound pipe themselves, so this guard short-
+    /// circuits in that case.
     private func handleControllerStopped() {
         guard lifecycle == .running else { return }
-        terminateAllSubscribers()
+        lifecycle = .stopping
+        terminateOnDrain = true
+        inboundContinuation?.finish()
+        inboundContinuation = nil
+    }
+
+    /// Invoked from the consumer Task once it has drained every frame
+    /// that was yielded before `inboundContinuation.finish()`. This is
+    /// the single point that completes a stop transition — subscribers
+    /// terminate (on unexpected stops) and `lifecycle` returns to
+    /// `.idle` here, so frames in flight at stop time are guaranteed
+    /// to reach subscribers before their streams end.
+    private func consumerFinished() {
+        consumer = nil
+        guard lifecycle == .stopping else { return }
+        if terminateOnDrain {
+            terminateOnDrain = false
+            terminateAllSubscribers()
+        }
         lifecycle = .idle
+        guard !subscribers.isEmpty else { return }
+        Task { [weak self] in await self?.ensureStarted() }
     }
 
     private func terminateAllSubscribers() {
@@ -160,15 +217,15 @@ extension AVCameraSource {
     /// Subscriber cleanup hook fired by `onTermination`. When the last
     /// subscriber drops, stop the underlying controller so we release
     /// the camera. New subscribers that arrive during the stop are
-    /// tolerated: after `controller.stop()` returns we re-check and
-    /// restart if any are waiting.
+    /// tolerated: `consumerFinished` re-checks the registry and
+    /// restarts if any are waiting.
     private func removeSubscriber(id: UUID) async {
         subscribers.removeValue(forKey: id)
         guard subscribers.isEmpty, lifecycle == .running else { return }
         lifecycle = .stopping
+        terminateOnDrain = false
         await controller.stop()
-        lifecycle = .idle
-        guard !subscribers.isEmpty else { return }
-        await ensureStarted()
+        inboundContinuation?.finish()
+        inboundContinuation = nil
     }
 }

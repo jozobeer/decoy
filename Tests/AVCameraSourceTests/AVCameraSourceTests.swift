@@ -16,6 +16,9 @@ struct AVCameraSourceTests {
         let f2 = Frame(presentationTime: 0.033, data: Data([0x02]))
 
         let stream = await source.frames()
+        // Same scheduling race as `framesArePreservedInOrder`: wait
+        // for the sink install hop before pushing.
+        await controller.awaitStartCount(1)
         await controller.push(f1)
         await controller.push(f2)
         await controller.finish()
@@ -67,6 +70,9 @@ struct AVCameraSourceTests {
 
         let s1 = await source.frames()
         let s2 = await source.frames()
+        // Wait for the single shared sink install before pushing
+        // (controller starts only once across both subscribers).
+        await controller.awaitStartCount(1)
         await controller.push(f)
         await controller.finish()
 
@@ -135,6 +141,11 @@ struct AVCameraSourceTests {
         }
 
         let stream = await source.frames()
+        // Wait until the source's `frames()` hop has installed the sink
+        // on the controller. Without this, `push` may run before the
+        // sink is wired and silently drop frames — flaky in serial
+        // mode where the scheduler doesn't interleave the start hop.
+        await controller.awaitStartCount(1)
         for frame in frames {
             await controller.push(frame)
         }
