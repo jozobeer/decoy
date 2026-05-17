@@ -15,8 +15,10 @@ coverage:
         threshold: 1%
 
 ignore:
-  # Domain は pure data only ― ロジックゼロなのでテスト不要
+  # Domain は protocol (port) only ― 契約面なのでテスト不要
   - "Sources/Domain/**"
+  # Entity は pure data only ― ロジックゼロなのでテスト不要
+  - "Sources/Entity/**"
   # DependencyInjection は wiring のみ（liveValue / testValue の一行結線）
   - "Sources/DependencyInjection/**"
   # AVFoundation 直結部分はテスト不能（実機カメラが要る）。translation と
