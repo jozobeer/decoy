@@ -115,6 +115,34 @@ struct RecorderSubscriptionTests {
         }
     }
 
+    @Test func subscription_droppedWithoutIterating_removesSubscriber() async throws {
+        // Caller obtains `RecorderEvents` but never iterates (the
+        // observing Task was cancelled before entering `for await`).
+        // Dropping the handle must release the actor-side subscriber
+        // slot via the class deinit, otherwise repeated start/cancel
+        // cycles leak continuations indefinitely.
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+        let store = InMemoryClipStore()
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = store
+            $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
+        } operation: {
+            let recorder = RecorderUseCaseImpl()
+            do {
+                let transient = await recorder.subscribeEvents()
+                #expect(await recorder.subscriberCount == 1)
+                // Reference `transient` after the await so ARC keeps
+                // it alive through the count check.
+                _ = transient
+            }
+            for _ in 0..<50 { await Task.megaYield() }
+            #expect(await recorder.subscriberCount == 0)
+        }
+    }
+
     @Test func shutdown_terminatesAllSubscribers() async throws {
         // shutdown() finishes every continuation and clears the dict.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])

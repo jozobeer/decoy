@@ -43,7 +43,9 @@ extension RecorderUseCaseImpl: RecorderUseCase {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return RecorderEvents(stream)
+        return RecorderEvents(stream: stream) { [weak self] in
+            Task { await self?.removeSubscriber(id: id) }
+        }
     }
 
     public func shutdown() async {
