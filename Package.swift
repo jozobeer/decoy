@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "AVCameraPermission", targets: ["AVCameraPermission"]),
         .library(name: "SystemExtensionInstaller", targets: ["SystemExtensionInstaller"]),
         .library(name: "InMemorySystemExtensionInstaller", targets: ["InMemorySystemExtensionInstaller"]),
+        .library(name: "InMemoryFrameTransport", targets: ["InMemoryFrameTransport"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -98,6 +99,7 @@ let package = Package(
         .target(name: "AVCameraPermission", dependencies: ["Domain"]),
         .target(name: "SystemExtensionInstaller", dependencies: ["Domain"]),
         .target(name: "InMemorySystemExtensionInstaller", dependencies: ["Domain"]),
+        .target(name: "InMemoryFrameTransport", dependencies: ["Domain"]),
         .target(
             name: "HotkeyService",
             dependencies: [
@@ -116,6 +118,7 @@ let package = Package(
                 "AVCameraPermission",
                 "SystemExtensionInstaller",
                 "InMemorySystemExtensionInstaller",
+                "InMemoryFrameTransport",
                 "HotkeyService",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
@@ -176,6 +179,7 @@ let package = Package(
         .testTarget(name: "AVCameraSourceTests", dependencies: ["AVCameraSource", "Domain"]),
         .testTarget(name: "AVCameraPermissionTests", dependencies: ["AVCameraPermission", "Domain"]),
         .testTarget(name: "SystemExtensionInstallerTests", dependencies: ["SystemExtensionInstaller", "Domain"]),
+        .testTarget(name: "InMemoryFrameTransportTests", dependencies: ["InMemoryFrameTransport", "Domain"]),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
             name: "MenuBarUITests",
