@@ -34,6 +34,15 @@ ignore:
   - "Sources/AVCameraPermission/AppKitCameraPermissionAlertPresenter.swift"
   # live-wiring 専用 file ― live provider + live presenter を組み合わせるだけ
   - "Sources/AVCameraPermission/AVCameraPermission+Live.swift"
+  # SystemExtensions framework 直結部分 ― OSSystemExtensionRequest delegate
+  # と OS 越しの install 通信のみで、実 .app bundle + 署名済み環境でしか
+  # 動かない。orchestrator (`SystemExtensionInstaller.swift`) 側で
+  # FakeSystemExtensionActivator を使った state transition test がカバー
+  - "Sources/SystemExtensionInstaller/OSSystemExtensionActivator.swift"
+  # live-wiring 専用 file ― live activator を組み合わせるだけ
+  - "Sources/SystemExtensionInstaller/SystemExtensionInstaller+Live.swift"
+  # in-memory stub ― テストプレースホルダのみ
+  - "Sources/InMemorySystemExtensionInstaller/**"
   # Decoy は Orchestrator ― actor / dispatcher / view-model を組み立てる
   # 一段の wiring のみ。ロジックは MenuBarViewModel / AppCommandDispatcher
   # 側でテスト済みなので、ここはカバー対象外。
