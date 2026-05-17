@@ -5,7 +5,7 @@ import DependencyInjection
 import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
-@testable import Recorder
+@testable import RecorderUseCase
 
 @Suite("RecorderIntegration")
 struct RecorderIntegrationTests {
@@ -35,7 +35,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -55,7 +55,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             #expect(await recorder.state == .idle)
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
@@ -76,7 +76,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -96,7 +96,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -117,7 +117,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -137,7 +137,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -157,7 +157,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -176,7 +176,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -197,7 +197,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
 
@@ -216,7 +216,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
             #expect(await recorder.state == .idle)
@@ -236,7 +236,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
@@ -258,7 +258,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.stopRecording)
 
             let saved = try await store.all()
@@ -277,7 +277,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
             await recorder.handle(.stopRecording)
@@ -305,7 +305,7 @@ struct RecorderIntegrationTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(foreign)
 
             let saved = try await store.all()

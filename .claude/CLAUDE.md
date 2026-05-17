@@ -28,7 +28,7 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
 - Entity は純粋データ（`Sources/Entity/`、computed property のロジック禁止）
 - Domain は port (protocol) only（`Sources/Domain/` ― 契約面のみ、`@_exported import Entity` で Entity 透過）
 - coverage-ignored: `Entity` / `Domain` / `DependencyInjection`
-- `Recorder` と `Broadcaster` は独立 actor（共有は CameraInput 参照のみ）
+- `Recorder` / `Broadcaster` は protocol 抽象＋actor impl の分離（`RecorderUseCase` / `BroadcasterUseCase` port を Domain に置き、`<Name>UseCaseImpl` actor を専用 module に分離 ― lyra と同じ pattern）
 - `AppCommand` enum で UI 入力経路を統一（adapter は AppCommand を発行するだけ）
 - AVCaptureSession / CMIO Camera Extension は port 化（`CameraSource`, `VirtualCameraSink` protocol）
 - メニューバー UI は SwiftUI `MenuBarExtra` ＋ 最小構成
@@ -38,7 +38,7 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
   - `Transport/` ― IPC port（`FrameTransport`）
   - `Repository/` ― 永続化 port（`ClipStore`）
   - `Installer/` ― System Extension 操作 port（`CameraExtensionInstaller`）
-  - Phase 3 で `UseCase/` が増える前提の予約
+  - `UseCase/` ― ビジネスロジック port（`RecorderUseCase`、Phase 3b で `BroadcasterUseCase` 追加予定）
 
 ### 捨てたパターン
 

@@ -1,11 +1,11 @@
 import Testing
 import Domain
-@testable import Recorder
+@testable import RecorderUseCase
 
-@Suite("Recorder")
+@Suite("RecorderUseCaseImpl")
 struct RecorderTests {
     @Test func defaultInit_startsIdle() async {
-        let recorder = Recorder()
+        let recorder = RecorderUseCaseImpl()
         #expect(await recorder.state == .idle)
     }
 }

@@ -7,7 +7,7 @@ import Domain
 import HotkeyService
 import MenuBarUI
 import OSLog
-import Recorder
+import RecorderUseCase
 import SwiftUI
 
 @main
@@ -26,9 +26,10 @@ struct DecoyApp: App {
 /// SPM executables have no Info.plist to set `LSUIElement`, so the
 /// activation policy is flipped programmatically on launch.
 ///
-/// Owns the single Recorder / Broadcaster / dispatcher graph so that
+/// Owns the Broadcaster / dispatcher / view-model graph so that
 /// global hotkeys と menu bar UI が同じ actor インスタンスへ dispatch
-/// する（コマンド経路を一本化）。
+/// する（コマンド経路を一本化）。Recorder は `@Dependency(\.recorder)`
+/// 経由で DI 解決 ― live は `RecorderUseCaseImpl()` singleton。
 ///
 /// Global hotkey 4 つは起動時に `HotkeyService` へ register し、
 /// 終了時に `unregisterAll` で解放する。HotKey ライブラリは Carbon の
@@ -41,10 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AppDelegate")
 
-    let recorder = Recorder()
     let broadcaster = Broadcaster()
-    lazy var dispatcher = AppCommandDispatcher(recorder: recorder, broadcaster: broadcaster)
-    lazy var viewModel = MenuBarViewModel(recorder: recorder, broadcaster: broadcaster, dispatcher: dispatcher)
+    lazy var dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+    lazy var viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: dispatcher)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             _ = await activation
         }
-        let bindings = DefaultHotkeyBindings.all(recorder: recorder, dispatcher: dispatcher)
+        let bindings = DefaultHotkeyBindings.all(dispatcher: dispatcher)
         Task { [hotkeyService] in
             for binding in bindings {
                 await hotkeyService.register(binding.shortcut, handler: binding.handler)
