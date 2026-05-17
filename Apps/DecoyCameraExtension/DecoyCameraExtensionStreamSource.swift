@@ -55,6 +55,9 @@ final class DecoyCameraExtensionStreamSource: NSObject, CMIOExtensionStreamSourc
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool { true }
 
     func startStream() throws {
+        // 既に動いている場合は何もしない ― 重複 timer で旧 timer が漏れて
+        // stopStream() でも止まらない bug を防ぐ。
+        guard timer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: timerQueue)
         timer.schedule(deadline: .now(), repeating: .nanoseconds(33_333_333), leeway: .milliseconds(5))
         timer.setEventHandler { [weak self] in
@@ -74,6 +77,10 @@ extension DecoyCameraExtensionStreamSource {
     private func emitFrame() {
         guard let pixelBuffer = renderer.nextFrame() else { return }
         guard let sampleBuffer = renderer.sampleBuffer(from: pixelBuffer) else { return }
-        stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: 0)
+        // `.hostTime` clocking なので Mach uptime 由来の nanoseconds を渡す。
+        // 0 を渡すと全 frame が同 timestamp 扱いになり client (Zoom 等) が
+        // drop / freeze する。
+        let hostTimeNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: hostTimeNs)
     }
 }
