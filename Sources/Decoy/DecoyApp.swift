@@ -37,6 +37,7 @@ struct DecoyApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @Dependency(\.hotkeyService) private var hotkeyService
     @Dependency(\.cameraPermission) private var cameraPermission
+    @Dependency(\.cameraExtensionInstaller) private var cameraExtensionInstaller
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AppDelegate")
 
@@ -60,6 +61,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let result = await cameraPermission.ensureGranted()
             guard case .failure(let error) = result else { return }
             Self.logger.warning("camera permission unavailable: \(String(describing: error), privacy: .public)")
+        }
+        // CMIO Camera Extension の install は起動毎に試行する。既に installed なら
+        // installer 側で早期 return (status .installed 観測時の guard) するため
+        // 副作用は最小。status 遷移は logger で観測 ― UI 表示は #44 follow-up で。
+        Task { [cameraExtensionInstaller] in
+            async let activation: Void = cameraExtensionInstaller.activate()
+            for await status in await cameraExtensionInstaller.status {
+                Self.logger.info("camera extension install status: \(String(describing: status), privacy: .public)")
+                if status == .installed { break }
+            }
+            _ = await activation
         }
         let bindings = DefaultHotkeyBindings.all(recorder: recorder, dispatcher: dispatcher)
         Task { [hotkeyService] in
