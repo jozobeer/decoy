@@ -1,3 +1,7 @@
+// COVERAGE: OS-direct wiring only ― SystemExtensionInstaller/SystemExtensionInstaller+Live.swift
+// is listed in codecov.yml ignore. See .claude/rules/coverage-ignored-modules.md
+// "+Live.swift extension pattern" for the contract.
+
 /// Live-wiring helper. `OSSystemExtensionActivator` を組み合わせて
 /// `SystemExtensionInstaller` actor を構築する。
 ///

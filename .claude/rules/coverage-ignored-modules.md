@@ -62,3 +62,53 @@ Tests/RandomSourceTests/   # tests for the implementation
 - "Coverage went up after I moved this file to the ignore list" — red flag
 - Implementation file in ignored module that does anything beyond
   `static let liveValue = X()` — move it out
+
+## `<Foo>+Live.swift` extension pattern
+
+When an adapter target (e.g. `AVCameraSource`, `AVCameraPermission`,
+`SystemExtensionInstaller`) has both **pure logic** and **OS-direct
+wiring**, split them by file:
+
+- `<Foo>.swift` — pure logic, covered by tests
+- `<Foo>+Live.swift` — extension carrying only OS-direct wiring,
+  `codecov.yml` で個別 ignore する
+
+This keeps the testable portion under quality gates while excluding the
+parts that can only be exercised on a real device.
+
+### Rules for `<Foo>+Live.swift`
+
+1. **Content limited to**:
+   - `extension Foo` with a `static func live(...) -> Foo`
+     (or `init(live:)`) that wires real OS handles into the adapter
+   - Stateless wrapper structs that call OS API directly
+   - Type-name shims (no behavior of their own)
+2. **File size: 50 lines** — including doc comments. If you need more,
+   the file is doing too much; extract the logic to the pure-logic file
+3. **No logic branches**:
+   - `if condition { do() } else { other() }` ❌
+   - `switch enum { case .a: ...; case .b: ... }` ❌
+4. **Guard-clause failure paths are OK**:
+   - `guard let x = OSLookup() else { throw .deviceUnavailable }` ✅
+   - `guard authorized else { throw .denied }` ✅
+   - Their bodies must be `throw` or `return`, matching the global
+     guard-clause rule
+5. **No mutable state** (`var`) — these files only resolve OS handles
+6. **File header**: open with the exact 3-line header below (replace
+   `<file path>` with the actual relative path) so the next reader sees
+   the contract immediately:
+
+   ```swift
+   // COVERAGE: OS-direct wiring only ― <file path>
+   // is listed in codecov.yml ignore. See .claude/rules/coverage-ignored-modules.md
+   // "+Live.swift extension pattern" for the contract.
+   ```
+
+### Current `+Live.swift` files (codecov.yml ignore 済み)
+
+- `Sources/AVCameraSource/AVCameraSource+Live.swift`
+- `Sources/AVCameraPermission/AVCameraPermission+Live.swift`
+- `Sources/SystemExtensionInstaller/SystemExtensionInstaller+Live.swift`
+
+If a `+Live.swift` outgrows these rules, that's a signal to extract the
+logic into a covered file (testable function on the adapter type).

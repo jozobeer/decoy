@@ -1,3 +1,7 @@
+// COVERAGE: OS-direct wiring only ― AVCameraSource/AVCameraSource+Live.swift
+// is listed in codecov.yml ignore. See .claude/rules/coverage-ignored-modules.md
+// "+Live.swift extension pattern" for the contract.
+
 import AVFoundation
 import Domain
 

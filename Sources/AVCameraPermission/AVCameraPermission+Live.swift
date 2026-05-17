@@ -1,3 +1,7 @@
+// COVERAGE: OS-direct wiring only ― AVCameraPermission/AVCameraPermission+Live.swift
+// is listed in codecov.yml ignore. See .claude/rules/coverage-ignored-modules.md
+// "+Live.swift extension pattern" for the contract.
+
 /// Live-wiring helper. `AVCaptureDeviceAuthorizationProvider` と
 /// `AppKitCameraPermissionAlertPresenter` を組み合わせて `AVCameraPermission`
 /// actor を構築する。
