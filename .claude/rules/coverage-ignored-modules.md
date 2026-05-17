@@ -94,9 +94,15 @@ parts that can only be exercised on a real device.
    - Their bodies must be `throw` or `return`, matching the global
      guard-clause rule
 5. **No mutable state** (`var`) — these files only resolve OS handles
-6. **File header**: open with `// COVERAGE: OS-direct wiring only ―
-   `<file>` listed in codecov.yml ignore` so the next reader sees the
-   contract immediately
+6. **File header**: open with the exact 3-line header below (replace
+   `<file path>` with the actual relative path) so the next reader sees
+   the contract immediately:
+
+   ```swift
+   // COVERAGE: OS-direct wiring only ― <file path>
+   // is listed in codecov.yml ignore. See .claude/rules/coverage-ignored-modules.md
+   // "+Live.swift extension pattern" for the contract.
+   ```
 
 ### Current `+Live.swift` files (codecov.yml ignore 済み)
 
