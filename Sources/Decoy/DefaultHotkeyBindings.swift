@@ -19,19 +19,29 @@ struct HotkeyBinding: Sendable {
 
 enum DefaultHotkeyBindings {
     static func all(dispatcher: AppCommandDispatcher) -> [HotkeyBinding] {
-        [
-            toggleRecording(dispatcher: dispatcher),
+        // Snapshot the recorder dependency at binding-creation time so
+        // the escaping handler binds to the same dependency graph as
+        // the rest of the app wiring. Resolving `@Dependency(\.recorder)`
+        // inside the closure would re-resolve at fire-time on whatever
+        // dependency context the hotkey Task runs in — empty in tests
+        // and previews, which silently dropped the toggle.
+        @Dependency(\.recorder) var recorderDep
+        let recorder = recorderDep
+        return [
+            toggleRecording(dispatcher: dispatcher, recorder: recorder),
             startDecoyLoop(dispatcher: dispatcher),
             returnToLive(dispatcher: dispatcher),
             startDecoyOnce(dispatcher: dispatcher),
         ]
     }
 
-    private static func toggleRecording(dispatcher: AppCommandDispatcher) -> HotkeyBinding {
+    private static func toggleRecording(
+        dispatcher: AppCommandDispatcher,
+        recorder: any RecorderUseCase
+    ) -> HotkeyBinding {
         HotkeyBinding(
             shortcut: KeyboardShortcut(key: .r, modifiers: [.command, .shift])
         ) {
-            @Dependency(\.recorder) var recorder
             let state = await recorder.state
             let command: AppCommand = state == .recording ? .stopRecording : .startRecording
             await dispatcher.dispatch(command)

@@ -14,6 +14,12 @@ public actor RecorderUseCaseImpl {
     private var buffer: [Frame] = []
     private var recordedAt: Date?
     private var subscribers: [UUID: AsyncStream<RecorderEvent>.Continuation] = [:]
+    /// Sticky flag mirroring `Broadcaster.terminated`. Once `shutdown()`
+    /// runs, any concurrent re-entry into `handle(.startRecording)` that
+    /// resumes after the await is a no-op — actor reentrancy would
+    /// otherwise let a new consumption Task spawn after `shutdown()`
+    /// cancels the old one, escaping the terminal cleanup.
+    private var terminated = false
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Recorder")
     private static let subscriberBufferLimit = 64
@@ -23,6 +29,7 @@ public actor RecorderUseCaseImpl {
 
 extension RecorderUseCaseImpl: RecorderUseCase {
     public func handle(_ command: AppCommand) async {
+        if terminated { return }
         switch command {
         case .startRecording:
             await beginRecording()
@@ -43,12 +50,16 @@ extension RecorderUseCaseImpl: RecorderUseCase {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return RecorderEvents(stream: stream) { [weak self] in
-            Task { await self?.removeSubscriber(id: id) }
-        }
+        return RecorderEvents(
+            stream: stream,
+            cancel: { [weak self] in
+                await self?.removeSubscriber(id: id)
+            }
+        )
     }
 
     public func shutdown() async {
+        terminated = true
         consumption?.cancel()
         await consumption?.value
         subscribers.values.forEach { $0.finish() }

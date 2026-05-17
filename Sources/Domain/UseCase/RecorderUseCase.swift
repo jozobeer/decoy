@@ -6,51 +6,30 @@ public enum RecorderEvent: Sendable {
     case saveFailed(any Error & Sendable)
 }
 
-/// AsyncSequence facade over `AsyncStream<RecorderEvent>`. Iterating
-/// directly with `for await event in events { ... }` is equivalent to
-/// iterating the underlying stream.
+/// Passive value facade exposing the recorder's event stream plus an
+/// explicit `cancel` closure for releasing the actor-side subscriber
+/// slot. The wrapper itself carries no behavior — Domain only stores
+/// the stream and the cleanup callback provided by the implementation
+/// target, so coverage-ignored Domain remains a contract layer.
 ///
-/// Lifecycle: this is a reference type so the actor-side subscriber
-/// slot is released deterministically when every iterator AND every
-/// external strong reference is dropped (Combine `AnyCancellable`
-/// pattern). Cleanup converges from three paths, whichever fires first
-/// wins and the others become idempotent no-ops:
-///
-/// 1. `RecorderEvents.deinit` — drop-driven cleanup when both the
-///    handle and every iterator are released. Covers the "subscribed
-///    but task cancelled before `for await` entered" race.
-/// 2. The underlying `AsyncStream.onTermination` — cancellation-driven
-///    cleanup for an iterating Task that gets cancelled.
-/// 3. The actor's `broadcast` loop — lazy `.terminated` cleanup as a
-///    final backstop.
-public final class RecorderEvents: AsyncSequence, Sendable {
+/// Cleanup contract: callers must invoke `cancel()` when done (use
+/// `defer { Task { await events.cancel() } }` around `for await`), so
+/// that subscriber slot release does not depend on iteration ever
+/// starting. The implementation target's `cancel` closure is
+/// idempotent and may be called from any cleanup path.
+public struct RecorderEvents: Sendable, AsyncSequence {
     public typealias Element = RecorderEvent
 
-    private let stream: AsyncStream<RecorderEvent>
-    private let cleanup: @Sendable () -> Void
+    public let stream: AsyncStream<RecorderEvent>
+    public let cancel: @Sendable () async -> Void
 
-    public init(stream: AsyncStream<RecorderEvent>, cleanup: @escaping @Sendable () -> Void) {
+    public init(stream: AsyncStream<RecorderEvent>, cancel: @escaping @Sendable () async -> Void) {
         self.stream = stream
-        self.cleanup = cleanup
+        self.cancel = cancel
     }
 
-    deinit { cleanup() }
-
-    public func makeAsyncIterator() -> AsyncIterator {
-        AsyncIterator(parent: self, inner: stream.makeAsyncIterator())
-    }
-
-    public struct AsyncIterator: AsyncIteratorProtocol {
-        /// Strong ref keeps the parent `RecorderEvents` alive for the
-        /// duration of iteration — without it, dropping the handle
-        /// mid-iteration would fire cleanup while events are still
-        /// being delivered.
-        let parent: RecorderEvents
-        var inner: AsyncStream<RecorderEvent>.AsyncIterator
-
-        public mutating func next() async -> RecorderEvent? {
-            await inner.next()
-        }
+    public func makeAsyncIterator() -> AsyncStream<RecorderEvent>.AsyncIterator {
+        stream.makeAsyncIterator()
     }
 }
 
@@ -84,7 +63,7 @@ private actor UnimplementedRecorderUseCase: RecorderUseCase {
 
     func subscribeEvents() async -> RecorderEvents {
         reportIssue("RecorderUseCase.subscribeEvents() called without a registered live or test value")
-        return RecorderEvents(stream: AsyncStream { $0.finish() }, cleanup: {})
+        return RecorderEvents(stream: AsyncStream { $0.finish() }, cancel: {})
     }
 
     func shutdown() async {

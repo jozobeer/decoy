@@ -15,11 +15,14 @@ import SwiftUI
 /// `state` properties back. This keeps the UI in lockstep with the
 /// underlying actors without inventing a parallel state machine.
 ///
-/// Lifetimes: each event task iterates an `AsyncSequence` whose
-/// continuation `onTermination` cleans up the actor-side subscriber
-/// slot when the iteration ends. The view-model stores only the Tasks
-/// themselves. On `deinit` we cancel the Tasks; cancellation ends
-/// iteration which fires `onTermination` to release the slot.
+/// Lifetimes: the recorder event task iterates a passive
+/// `RecorderEvents` value facade and uses `defer { Task { await
+/// events.cancel() } }` so the actor-side subscriber slot is released
+/// whether the task ends naturally, is cancelled before iteration
+/// begins, or is cancelled mid-iteration. The broadcaster path keeps
+/// the same shape via its own `Subscription` token. On `deinit` we
+/// cancel both Tasks; cancellation fires the `defer` cleanup which
+/// hops back into the actor to release the slot.
 @MainActor
 public final class MenuBarViewModel: ObservableObject {
     @Published public private(set) var recordingState: RecordingState = .idle
@@ -121,6 +124,10 @@ extension MenuBarViewModel {
         let recorder = self.recorder
         return Task { [weak self] in
             let events = await recorder.subscribeEvents()
+            // Cleanup must run even if this Task is cancelled before
+            // `for await` is entered. Otherwise the actor-side subscriber
+            // slot leaks across `start()`'s cancel→recreate cycle.
+            defer { Task { await events.cancel() } }
             for await event in events {
                 await self?.handleRecorderEvent(event)
             }

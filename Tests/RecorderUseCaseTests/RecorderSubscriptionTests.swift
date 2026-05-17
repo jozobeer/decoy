@@ -115,12 +115,14 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func subscription_droppedWithoutIterating_removesSubscriber() async throws {
+    @Test func subscription_explicitCancel_releasesSubscriber() async throws {
         // Caller obtains `RecorderEvents` but never iterates (the
         // observing Task was cancelled before entering `for await`).
-        // Dropping the handle must release the actor-side subscriber
-        // slot via the class deinit, otherwise repeated start/cancel
-        // cycles leak continuations indefinitely.
+        // The passive value facade has no deinit-driven cleanup, so
+        // callers must invoke `events.cancel()` explicitly (typically
+        // via `defer { Task { await events.cancel() } }`). This
+        // covers the leak path that surfaces during `MenuBarViewModel.start()`'s
+        // cancel→recreate cycle.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
@@ -131,15 +133,56 @@ struct RecorderSubscriptionTests {
             $0.uuid = .incrementing
         } operation: {
             let recorder = RecorderUseCaseImpl()
-            do {
-                let transient = await recorder.subscribeEvents()
-                #expect(await recorder.subscriberCount == 1)
-                // Reference `transient` after the await so ARC keeps
-                // it alive through the count check.
-                _ = transient
-            }
+            let transient = await recorder.subscribeEvents()
+            #expect(await recorder.subscriberCount == 1)
+            await transient.cancel()
             for _ in 0..<50 { await Task.megaYield() }
             #expect(await recorder.subscriberCount == 0)
+        }
+    }
+
+    @Test func subscription_explicitCancel_isIdempotent() async throws {
+        // `cancel()` may be invoked from multiple cleanup paths
+        // (`defer` after `for await`, deinit chains in caller-side
+        // wrappers). Calling it twice must not crash and must not
+        // double-remove anything in the actor-side bookkeeping.
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+        let store = InMemoryClipStore()
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = store
+            $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
+        } operation: {
+            let recorder = RecorderUseCaseImpl()
+            let events = await recorder.subscribeEvents()
+            await events.cancel()
+            await events.cancel()
+            #expect(await recorder.subscriberCount == 0)
+        }
+    }
+
+    @Test func shutdown_blocksConcurrentHandle() async throws {
+        // `shutdown()` sets a sticky `terminated` flag before its
+        // `await`, so a concurrent `handle(.startRecording)` that
+        // resumes via actor reentrancy must observe the flag and
+        // become a no-op. Otherwise a new consumption Task spawns
+        // after the shutdown await and escapes terminal cleanup.
+        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+        let store = InMemoryClipStore()
+
+        try await withDependencies {
+            $0.cameraSource = source
+            $0.clipStore = store
+            $0.date = .constant(Self.fixedDate)
+            $0.uuid = .incrementing
+        } operation: {
+            let recorder = RecorderUseCaseImpl()
+            await recorder.shutdown()
+            // Post-shutdown command must be ignored — state stays idle.
+            await recorder.handle(.startRecording)
+            #expect(await recorder.state == .idle)
         }
     }
 
