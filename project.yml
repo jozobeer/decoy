@@ -72,12 +72,37 @@ targets:
         product: HotkeyService
       - package: DecoyPackage
         product: MenuBarUI
+      # SystemExtension bundle を host .app の Contents/Library/SystemExtensions/
+      # に embed する。`embed: true` (default) + `codeSign: true` で signing も伝播。
+      - target: DecoyCameraExtension
+        embed: true
+        codeSign: true
+
+  DecoyCameraExtension:
+    # SystemExtension bundle (CMIO Camera Extension)。
+    # `system-extension` type は xcodegen が `.systemextension` 拡張 + system
+    # extension product type に翻訳する。
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: Apps/DecoyCameraExtension
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: beer.jozo.decoy.CameraExtension
+        INFOPLIST_FILE: Apps/DecoyCameraExtension/Info.plist
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Apps/DecoyCameraExtension/DecoyCameraExtension.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
 
 schemes:
   Decoy:
     build:
       targets:
         Decoy: all
+        DecoyCameraExtension: all
     run:
       config: Debug
     archive:
