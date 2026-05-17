@@ -43,19 +43,22 @@ jobs:
         run: swift test --enable-code-coverage --parallel
 
       - name: Export lcov
-        # SPM は test bundle を `.build/<triple>/<config>/<Package>PackageTests.xctest`
-        # に吐く。`default.profdata` は同じ build dir 配下の `codecov/` にある。
+        # SPM 6.0+ は test target を 1 つの `<Pkg>PackageTests.xctest` に集約する
+        # (test discovery 経由)。`swift test --show-codecov-path` で profdata と
+        # 同居する `codecov/codecov.json` の deterministic な path を引き、
+        # その兄弟の `default.profdata` ＋ 親 dir の xctest bundle を解決する。
         run: |
           set -euo pipefail
-          PROFDATA=$(find .build -name 'default.profdata' | head -n 1)
-          if [ -z "$PROFDATA" ]; then
-            echo "default.profdata not found under .build/" >&2
+          CODECOV_DIR=$(dirname "$(swift test --show-codecov-path)")
+          PROFDATA="${CODECOV_DIR}/default.profdata"
+          if [ ! -f "$PROFDATA" ]; then
+            echo "default.profdata not found at $PROFDATA" >&2
             exit 1
           fi
-          BIN=$(swift build --show-bin-path)
-          XCTEST=$(find "$BIN" -maxdepth 2 -name '*.xctest' | head -n 1)
+          BUILD_DIR=$(dirname "$CODECOV_DIR")
+          XCTEST=$(find "$BUILD_DIR" -maxdepth 1 -name '*PackageTests.xctest' -print -quit)
           if [ -z "$XCTEST" ]; then
-            echo "test bundle not found under $BIN" >&2
+            echo "<Pkg>PackageTests.xctest not found under $BUILD_DIR" >&2
             exit 1
           fi
           EXEC="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
