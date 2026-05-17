@@ -1,0 +1,74 @@
+name: Swift Test
+
+# SPM の `swift test` をカバレッジ付きで走らせて Codecov に upload する。
+# - 95% target は codecov.yml で宣言済み。この workflow が gate を実効化する
+# - Xcode build は別 workflow (xcode-build.yml) 担当 ― .app 検証と単体テストは関心が違う
+#
+# Security note: 外部入力 (PR title / body / commit message 等) を一切使わないため
+# command injection の余地なし。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Sources/**
+      - Tests/**
+      - Package.swift
+      - Package.resolved
+      - codecov.yml
+      - .github/workflows/swift-test.yml
+  workflow_dispatch:
+
+# 同一 PR / branch で連続 push されたとき、古い run を打ち切る。
+# macOS runner は遅くて高コストなので、最新コミットのみを保証する。
+concurrency:
+  group: swift-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Xcode は runner image のデフォルトを利用 ― 明示 pin は image rotation で
+      # 容易に壊れる。SPM 6.0 + macOS 14 deployment target に合致する Xcode 16+
+      # が macos-15 image の default。
+
+      - name: Run tests with coverage
+        run: swift test --enable-code-coverage --parallel
+
+      - name: Export lcov
+        # SPM は test bundle を `.build/<triple>/<config>/<Package>PackageTests.xctest`
+        # に吐く。`default.profdata` は同じ build dir 配下の `codecov/` にある。
+        run: |
+          set -euo pipefail
+          PROFDATA=$(find .build -name 'default.profdata' | head -n 1)
+          if [ -z "$PROFDATA" ]; then
+            echo "default.profdata not found under .build/" >&2
+            exit 1
+          fi
+          BIN=$(swift build --show-bin-path)
+          XCTEST=$(find "$BIN" -maxdepth 2 -name '*.xctest' | head -n 1)
+          if [ -z "$XCTEST" ]; then
+            echo "test bundle not found under $BIN" >&2
+            exit 1
+          fi
+          EXEC="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
+          xcrun llvm-cov export \
+            -format=lcov \
+            -instr-profile "$PROFDATA" \
+            -ignore-filename-regex='\.build/|Tests/' \
+            "$EXEC" > coverage.lcov
+          echo "lcov lines: $(wc -l < coverage.lcov)"
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
