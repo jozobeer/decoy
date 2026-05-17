@@ -25,12 +25,20 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
 
 - `swift-dependencies` 経由の DI（`@Dependency` / `liveValue` / `testValue`）
 - `Clock` 抽象（時間は port 化）
-- Domain は純粋データ（Entity 規約：computed property のロジック禁止）
-- coverage-ignored: `Domain` / `DependencyInjection`
+- Entity は純粋データ（`Sources/Entity/`、computed property のロジック禁止）
+- Domain は port (protocol) only（`Sources/Domain/` ― 契約面のみ、`@_exported import Entity` で Entity 透過）
+- coverage-ignored: `Entity` / `Domain` / `DependencyInjection`
 - `Recorder` と `Broadcaster` は独立 actor（共有は CameraInput 参照のみ）
 - `AppCommand` enum で UI 入力経路を統一（adapter は AppCommand を発行するだけ）
 - AVCaptureSession / CMIO Camera Extension は port 化（`CameraSource`, `VirtualCameraSink` protocol）
 - メニューバー UI は SwiftUI `MenuBarExtra` ＋ 最小構成
+- Domain サブディレクトリは port の責務で層別（lyra 流）：
+  - `DataSource/` ― OS への薄い入力 port（`CameraSource` / `CameraPermission` / `HotkeyService`）
+  - `Sink/` ― OS への出力 port（`VirtualCameraSink`）
+  - `Transport/` ― IPC port（`FrameTransport`）
+  - `Repository/` ― 永続化 port（`ClipStore`）
+  - `Installer/` ― System Extension 操作 port（`CameraExtensionInstaller`）
+  - Phase 3 で `UseCase/` が増える前提の予約
 
 ### 捨てたパターン
 
@@ -46,11 +54,13 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
 常に **外 → 内**（Clean Architecture / hexagonal）：
 
 ```
-adapter ──> usecase ──> domain
-   ▲           ▲          ▲
-   └─ port ────┘          │
-                          │
-   Domain は外部の何にも依存しない（純粋）
+adapter ──> usecase ──> domain ──> entity
+   ▲           ▲          ▲         ▲
+   └─ port ────┘          │         │
+                          │         │
+   Domain は protocol (port) のみ ― Entity と
+   swift-dependencies (DependencyKey 用) 以外には依存しない。
+   Entity は何にも依存しない純粋データ。
 ```
 
 ---
