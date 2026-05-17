@@ -31,6 +31,13 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
 - `AppCommand` enum で UI 入力経路を統一（adapter は AppCommand を発行するだけ）
 - AVCaptureSession / CMIO Camera Extension は port 化（`CameraSource`, `VirtualCameraSink` protocol）
 - メニューバー UI は SwiftUI `MenuBarExtra` ＋ 最小構成
+- Domain サブディレクトリは port の責務で層別（lyra 流）：
+  - `DataSource/` ― OS への薄い入力 port（`CameraSource` / `CameraPermission` / `HotkeyService`）
+  - `Sink/` ― OS への出力 port（`VirtualCameraSink`）
+  - `Transport/` ― IPC port（`FrameTransport`）
+  - `Repository/` ― 永続化 port（`ClipStore`）
+  - `Installer/` ― System Extension 操作 port（`CameraExtensionInstaller`）
+  - Phase 3 で `UseCase/` が増える前提の予約
 
 ### 捨てたパターン
 
