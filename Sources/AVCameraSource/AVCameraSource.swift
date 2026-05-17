@@ -121,7 +121,15 @@ extension AVCameraSource {
     private func ensureStarted() async {
         guard lifecycle == .idle else { return }
         lifecycle = .running
-        let (inbound, continuation) = AsyncStream.makeStream(of: Frame.self)
+        // Bounded inbound buffer mirrors `perSubscriberBufferDepth`: under
+        // momentary consumer lag we tolerate a short queue and beyond
+        // that drop the oldest frame so memory stays flat. Unbounded
+        // would let AVFoundation's producer outpace our actor hop and
+        // grow without limit.
+        let (inbound, continuation) = AsyncStream.makeStream(
+            of: Frame.self,
+            bufferingPolicy: .bufferingNewest(Self.perSubscriberBufferDepth)
+        )
         inboundContinuation = continuation
         consumer = Task { [weak self] in
             for await frame in inbound {
@@ -141,18 +149,20 @@ extension AVCameraSource {
             )
         } catch {
             Self.logger.error("CaptureSessionController.start failed: \(error.localizedDescription, privacy: .private)")
-            // Roll back any partial controller state before tearing down
-            // subscribers; AVFoundation may have set up resources before
-            // throwing and leaving them attached can poison the next
-            // start attempt.
-            await controller.stop()
-            // Drive the consumer to exit and terminate subscribers via
-            // the standard drain path so callers waiting on `frames()`
-            // streams see a clean end-of-stream.
+            // Pre-stage the drain transition BEFORE awaiting `stop()`.
+            // `controller.stop()` may invoke its `onStop` callback while
+            // we are suspended here, scheduling `handleControllerStopped`
+            // — without `lifecycle = .stopping` in place, the racing
+            // handler's `guard lifecycle == .running` would re-enter the
+            // drain and `consumerFinished` could land before this catch
+            // body resumes, leaving the actor wedged in `.stopping` with
+            // `consumer == nil`. Staging the transition first makes the
+            // racing handler short-circuit.
             lifecycle = .stopping
             terminateOnDrain = true
             inboundContinuation?.finish()
             inboundContinuation = nil
+            await controller.stop()
         }
     }
 
