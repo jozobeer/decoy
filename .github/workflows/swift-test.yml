@@ -1,0 +1,92 @@
+name: Swift Test
+
+# SPM の `swift test` をカバレッジ付きで走らせて Codecov に upload する。
+# - 95% target は codecov.yml で宣言済み。この workflow が gate を実効化する
+# - Xcode build は別 workflow (xcode-build.yml) 担当 ― .app 検証と単体テストは関心が違う
+#
+# Security note: 外部入力 (PR title / body / commit message 等) を一切使わないため
+# command injection の余地なし。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Sources/**
+      - Tests/**
+      - Package.swift
+      - Package.resolved
+      - codecov.yml
+      - .github/workflows/swift-test.yml
+  workflow_dispatch:
+
+# 同一 PR / branch で連続 push されたとき、古い run を打ち切る。
+# macOS runner は遅くて高コストなので、最新コミットのみを保証する。
+concurrency:
+  group: swift-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    # 通常 207 tests が 2s 弱 / 単体 PR でも 10 分以内に CI が完走する前提。
+    # 20 分超で hang を疑って run を打ち切り、cooperative thread pool starvation
+    # など再発防止しづらい silent hang を顕在化させる (#54 参照)。
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Xcode は runner image のデフォルトを利用 ― 明示 pin は image rotation で
+      # 容易に壊れる。SPM 6.0 + macOS 14 deployment target に合致する Xcode 16+
+      # が macos-15 image の default。
+
+      - name: Run tests with coverage
+        # `--no-parallel` 必須。swift-testing の並列実行は actor + megaYield
+        # ループが多数走ると cooperative thread pool を飽和させて silent hang
+        # する (#54 で再現確認 ― 単体実行は <2s)。並列化のメリットはほぼゼロ、
+        # リスクだけが残る。
+        run: swift test --enable-code-coverage --no-parallel
+
+      - name: Export lcov
+        # SPM 6.0+ は test target を 1 つの `<Pkg>PackageTests.xctest` に集約する
+        # (test discovery 経由)。`swift test --show-codecov-path` で profdata と
+        # 同居する `codecov/codecov.json` の deterministic な path を引き、
+        # その兄弟の `default.profdata` ＋ 親 dir の xctest bundle を解決する。
+        run: |
+          set -euo pipefail
+          CODECOV_DIR=$(dirname "$(swift test --show-codecov-path)")
+          PROFDATA="${CODECOV_DIR}/default.profdata"
+          if [ ! -f "$PROFDATA" ]; then
+            echo "default.profdata not found at $PROFDATA" >&2
+            exit 1
+          fi
+          BUILD_DIR=$(dirname "$CODECOV_DIR")
+          XCTEST=$(find "$BUILD_DIR" -maxdepth 1 -name '*PackageTests.xctest' -print -quit)
+          if [ -z "$XCTEST" ]; then
+            echo "<Pkg>PackageTests.xctest not found under $BUILD_DIR" >&2
+            exit 1
+          fi
+          EXEC="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
+          xcrun llvm-cov export \
+            -format=lcov \
+            -instr-profile "$PROFDATA" \
+            -ignore-filename-regex='\.build/|Tests/' \
+            "$EXEC" > coverage.lcov
+          echo "lcov lines: $(wc -l < coverage.lcov)"
+
+      - name: Upload to Codecov
+        # repo が private のため、token なしでは protected branch への upload が
+        # 弾かれる。secret 未設定でも他 PR がブロックされないよう、token が空の
+        # ときは upload step を skip する。secret 設定後は条件が常に true になり
+        # 通常 upload する。
+        if: ${{ env.CODECOV_TOKEN != '' }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

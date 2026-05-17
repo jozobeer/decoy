@@ -4,7 +4,7 @@
 
 # Decoy
 
-![status](https://img.shields.io/badge/status-bootstrapping-yellow) ![platform](https://img.shields.io/badge/platform-macOS-blue) ![language](https://img.shields.io/badge/language-Swift-orange) ![license](https://img.shields.io/badge/license-MIT-green) ![methodology](https://img.shields.io/badge/methodology-TDD-green)
+![status](https://img.shields.io/badge/status-bootstrapping-yellow) ![platform](https://img.shields.io/badge/platform-macOS-blue) ![language](https://img.shields.io/badge/language-Swift-orange) ![license](https://img.shields.io/badge/license-MIT-green) ![methodology](https://img.shields.io/badge/methodology-TDD-green) [![codecov](https://codecov.io/gh/jozobeer/decoy/branch/main/graph/badge.svg)](https://codecov.io/gh/jozobeer/decoy)
 
 > 撮ることと、<img src="https://mojiemoji.jozo.beer/emoji/%E8%A6%8B%E3%81%9B%E3%82%8B?font=pixel&color=06b6d4&animation=roulette&speed=normal&background=transparent&outline=darker&outline_width=2" alt="見せる" height="20" align="absmiddle"> ことを、別の <img src="https://mojiemoji.jozo.beer/emoji/%E8%9B%87%E5%8F%A3?font=mincho&color=f87171&animation=gatagata&speed=slow&background=transparent&outline=darker&outline_width=2" alt="蛇口" height="20" align="absmiddle"> にする
 
