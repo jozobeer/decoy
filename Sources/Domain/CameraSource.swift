@@ -1,3 +1,5 @@
+import Dependencies
+
 /// カメラから連続的にフレームを取り出すための port。
 ///
 /// 実装は以下の契約を満たすこと：
@@ -12,4 +14,22 @@
 ///   実装は購読を抱え込み続けないこと）
 public protocol CameraSource: Sendable {
     func frames() async -> AsyncStream<Frame>
+}
+
+public enum CameraSourceKey: TestDependencyKey {
+    public static let testValue: any CameraSource = UnimplementedCameraSource()
+}
+
+extension DependencyValues {
+    public var cameraSource: any CameraSource {
+        get { self[CameraSourceKey.self] }
+        set { self[CameraSourceKey.self] = newValue }
+    }
+}
+
+private struct UnimplementedCameraSource: CameraSource {
+    func frames() async -> AsyncStream<Frame> {
+        reportIssue(#"@Dependency(\.cameraSource)"#)
+        return AsyncStream { $0.finish() }
+    }
 }

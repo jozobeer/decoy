@@ -1,3 +1,5 @@
+import Dependencies
+
 /// カメラ認可を「取りに行く」port。
 ///
 /// 役割：
@@ -25,4 +27,22 @@ public enum CameraPermissionError: Error, Equatable, Sendable {
     case denied
     /// ペアレンタルコントロール / MDM 等で利用そのものが制限されている。
     case restricted
+}
+
+public enum CameraPermissionKey: TestDependencyKey {
+    public static let testValue: any CameraPermission = UnimplementedCameraPermission()
+}
+
+extension DependencyValues {
+    public var cameraPermission: any CameraPermission {
+        get { self[CameraPermissionKey.self] }
+        set { self[CameraPermissionKey.self] = newValue }
+    }
+}
+
+private struct UnimplementedCameraPermission: CameraPermission {
+    func ensureGranted() async -> Result<Void, CameraPermissionError> {
+        reportIssue(#"@Dependency(\.cameraPermission)"#)
+        return .failure(.denied)
+    }
 }

@@ -75,7 +75,12 @@ let package = Package(
                 "AppCommandDispatcher",
             ]
         ),
-        .target(name: "Domain"),
+        .target(
+            name: "Domain",
+            dependencies: [
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ]
+        ),
         .target(
             name: "Recorder",
             dependencies: [

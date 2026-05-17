@@ -1,3 +1,4 @@
+import Dependencies
 import Foundation
 
 /// host (Broadcaster 配下) から extension (Camera Extension) へ frame を
@@ -51,4 +52,33 @@ public enum FrameTransportError: Error, Equatable, Sendable {
     case disconnectedDuringSend
     /// IPC 層 (Mach port / IOSurface) でのエラー。
     case transport(reason: String)
+}
+
+public enum FrameTransportKey: TestDependencyKey {
+    public static let testValue: any FrameTransport = UnimplementedFrameTransport()
+}
+
+extension DependencyValues {
+    public var frameTransport: any FrameTransport {
+        get { self[FrameTransportKey.self] }
+        set { self[FrameTransportKey.self] = newValue }
+    }
+}
+
+private struct UnimplementedFrameTransport: FrameTransport {
+    var events: AsyncStream<FrameTransportEvent> {
+        get async {
+            reportIssue(#"@Dependency(\.frameTransport)"#)
+            return AsyncStream { $0.finish() }
+        }
+    }
+    func connect() async throws {
+        reportIssue(#"@Dependency(\.frameTransport)"#)
+    }
+    func disconnect() async {
+        reportIssue(#"@Dependency(\.frameTransport)"#)
+    }
+    func send(_ frame: Frame) async throws {
+        reportIssue(#"@Dependency(\.frameTransport)"#)
+    }
 }
