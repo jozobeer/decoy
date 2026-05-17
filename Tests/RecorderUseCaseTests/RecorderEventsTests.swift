@@ -5,7 +5,7 @@ import DependencyInjection
 import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
-@testable import Recorder
+@testable import RecorderUseCase
 
 @Suite("RecorderEvents", .timeLimit(.minutes(1)))
 struct RecorderEventsTests {
@@ -30,7 +30,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -56,7 +56,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -81,7 +81,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 2) {
                 await withDependencies {
                     $0.cameraSource = source1
@@ -119,7 +119,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -144,7 +144,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -168,7 +168,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             _ = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -187,7 +187,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 2) {
                 await withDependencies {
                     $0.cameraSource = firstSource
@@ -229,7 +229,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -254,7 +254,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(foreign)
             }
@@ -272,7 +272,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 0) {
                 await recorder.handle(.stopRecording)
             }
@@ -290,7 +290,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.startRecording)
@@ -310,7 +310,7 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             let events = await collectEvents(from: recorder, upTo: 1) {
                 await recorder.handle(.startRecording)
                 await recorder.handle(.stopRecording)
@@ -332,13 +332,13 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
 
             let firstSub = await recorder.subscribeEvents()
             let secondSub = await recorder.subscribeEvents()
 
-            async let firstEvents: [Recorder.Event] = take(firstSub, count: 1)
-            async let secondEvents: [Recorder.Event] = take(secondSub, count: 1)
+            async let firstEvents: [RecorderEvent] = take(firstSub, count: 1)
+            async let secondEvents: [RecorderEvent] = take(secondSub, count: 1)
 
             await recorder.handle(.startRecording)
             await recorder.handle(.stopRecording)
@@ -367,12 +367,12 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
             await recorder.handle(.startRecording)
 
             // subscribe AFTER start but BEFORE stop
             let subscription = await recorder.subscribeEvents()
-            async let events: [Recorder.Event] = take(subscription, count: 1)
+            async let events: [RecorderEvent] = take(subscription, count: 1)
 
             await recorder.handle(.stopRecording)
 
@@ -395,16 +395,16 @@ struct RecorderEventsTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let recorder = Recorder()
+            let recorder = RecorderUseCaseImpl()
 
             let persistentSub = await recorder.subscribeEvents()
             let cancelledSub = await recorder.subscribeEvents()
 
             // Persistent subscriber that will observe the event.
-            async let persistentEvents: [Recorder.Event] = take(persistentSub, count: 1)
+            async let persistentEvents: [RecorderEvent] = take(persistentSub, count: 1)
 
             // Doomed subscriber that gets cancelled before any event flows.
-            let doomed = Task<[Recorder.Event], Never> { [cancelledSub] in
+            let doomed = Task<[RecorderEvent], Never> { [cancelledSub] in
                 await take(cancelledSub, count: 1)
             }
             doomed.cancel()
@@ -444,12 +444,12 @@ extension RecorderEventsTests {
     /// passes; unbounded draining would require an extra synchronisation
     /// primitive between actor and consumer.
     private func collectEvents(
-        from recorder: Recorder,
+        from recorder: RecorderUseCaseImpl,
         upTo count: Int,
         while action: @Sendable () async -> Void
-    ) async -> [Recorder.Event] {
+    ) async -> [RecorderEvent] {
         let subscription = await recorder.subscribeEvents()
-        let collector = Task<[Recorder.Event], Never> { [subscription] in
+        let collector = Task<[RecorderEvent], Never> { [subscription] in
             await drain(subscription)
         }
         await action()
@@ -459,16 +459,16 @@ extension RecorderEventsTests {
         return await collector.value
     }
 
-    private func drain(_ subscription: Recorder.Subscription) async -> [Recorder.Event] {
-        var collected: [Recorder.Event] = []
+    private func drain(_ subscription: RecorderEvents) async -> [RecorderEvent] {
+        var collected: [RecorderEvent] = []
         for await event in subscription {
             collected.append(event)
         }
         return collected
     }
 
-    private func take(_ subscription: Recorder.Subscription, count: Int) async -> [Recorder.Event] {
-        var collected: [Recorder.Event] = []
+    private func take(_ subscription: RecorderEvents, count: Int) async -> [RecorderEvent] {
+        var collected: [RecorderEvent] = []
         for await event in subscription {
             collected.append(event)
             if collected.count >= count { break }

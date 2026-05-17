@@ -1,15 +1,9 @@
 import Foundation
 import OSLog
 import Dependencies
-import DependencyInjection
 import Domain
 
-public actor Recorder {
-    public enum Event: Sendable {
-        case saved(Clip)
-        case saveFailed(any Error & Sendable)
-    }
-
+public actor RecorderUseCaseImpl {
     @Dependency(\.cameraSource) private var cameraSource
     @Dependency(\.clipStore) private var clipStore
     @Dependency(\.date) private var date
@@ -19,14 +13,23 @@ public actor Recorder {
     private var consumption: Task<Void, Never>?
     private var buffer: [Frame] = []
     private var recordedAt: Date?
-    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    private var subscribers: [UUID: AsyncStream<RecorderEvent>.Continuation] = [:]
+    /// Sticky flag mirroring `Broadcaster.terminated`. Once `shutdown()`
+    /// runs, any concurrent re-entry into `handle(.startRecording)` that
+    /// resumes after the await is a no-op — actor reentrancy would
+    /// otherwise let a new consumption Task spawn after `shutdown()`
+    /// cancels the old one, escaping the terminal cleanup.
+    private var terminated = false
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Recorder")
     private static let subscriberBufferLimit = 64
 
     public init() {}
+}
 
+extension RecorderUseCaseImpl: RecorderUseCase {
     public func handle(_ command: AppCommand) async {
+        if terminated { return }
         switch command {
         case .startRecording:
             await beginRecording()
@@ -37,21 +40,9 @@ public actor Recorder {
         }
     }
 
-    /// Returns a `Subscription` token whose lifetime owns the
-    /// underlying subscriber slot. The token IS the `AsyncSequence` —
-    /// `for await event in subscription { ... }` — and its iterator
-    /// strongly retains the token, so iteration cannot outlive
-    /// ownership. Cleanup converges from three paths, whichever fires
-    /// first wins and the others become idempotent no-ops:
-    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup
-    ///    when every iterator AND every external strong reference is
-    ///    released (Combine `AnyCancellable` pattern).
-    /// 2. `onTermination` — cancellation-driven cleanup for iteration
-    ///    Tasks that cancel.
-    /// 3. `broadcast` — lazy `.terminated` cleanup as a final backstop.
-    public func subscribeEvents() -> Subscription {
+    public func subscribeEvents() async -> RecorderEvents {
         let (stream, continuation) = AsyncStream.makeStream(
-            of: Event.self,
+            of: RecorderEvent.self,
             bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
         )
         let id = UUID()
@@ -59,52 +50,24 @@ public actor Recorder {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return Subscription(stream: stream) { [weak self] in
-            Task { await self?.removeSubscriber(id: id) }
-        }
-    }
-}
-
-public extension Recorder {
-    /// Strong-ref token returned by `subscribeEvents()`. Iterate it
-    /// directly with `for await event in subscription` — the iterator
-    /// retains the token, so the consumer can't accidentally release
-    /// ownership while iterating. Drop every reference (token + all
-    /// active iterators) to deterministically remove the subscriber
-    /// slot.
-    final class Subscription: AsyncSequence, Sendable {
-        public typealias Element = Event
-
-        private let stream: AsyncStream<Event>
-        private let cleanup: @Sendable () -> Void
-
-        init(stream: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
-            self.stream = stream
-            self.cleanup = cleanup
-        }
-
-        deinit { cleanup() }
-
-        public func makeAsyncIterator() -> AsyncIterator {
-            AsyncIterator(subscription: self, inner: stream.makeAsyncIterator())
-        }
-
-        public struct AsyncIterator: AsyncIteratorProtocol {
-            /// Strong ref keeps the parent `Subscription` alive for the
-            /// duration of iteration — closes the gap where extracting
-            /// the stream from a temporary token would let ARC release
-            /// the token before any event was delivered.
-            let subscription: Subscription
-            var inner: AsyncStream<Event>.AsyncIterator
-
-            public mutating func next() async -> Event? {
-                await inner.next()
+        return RecorderEvents(
+            stream: stream,
+            cancel: { [weak self] in
+                await self?.removeSubscriber(id: id)
             }
-        }
+        )
+    }
+
+    public func shutdown() async {
+        terminated = true
+        consumption?.cancel()
+        await consumption?.value
+        subscribers.values.forEach { $0.finish() }
+        subscribers.removeAll()
     }
 }
 
-extension Recorder {
+extension RecorderUseCaseImpl {
     private func beginRecording() async {
         guard state == .idle else { return }
         state = .recording
@@ -153,7 +116,7 @@ extension Recorder {
         }
     }
 
-    private func broadcast(_ event: Event) {
+    private func broadcast(_ event: RecorderEvent) {
         let snapshot = subscribers
         let terminated = snapshot.compactMap { id, continuation -> UUID? in
             switch continuation.yield(event) {
@@ -168,15 +131,9 @@ extension Recorder {
         terminated.forEach { subscribers.removeValue(forKey: $0) }
     }
 
-    /// Unregister the subscriber AND deterministically terminate its
-    /// stream. The `finish()` ensures any active iterator exits cleanly
-    /// when cleanup runs from a path other than the iterator itself
-    /// (e.g., `onTermination` from a cancelled Task).
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)?.finish()
     }
 
-    /// Test-only hook for verifying cleanup. Reflects the live size of
-    /// the subscribers dict.
     internal var subscriberCount: Int { subscribers.count }
 }

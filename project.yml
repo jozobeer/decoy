@@ -61,7 +61,7 @@ targets:
       - package: DecoyPackage
         product: Domain
       - package: DecoyPackage
-        product: Recorder
+        product: RecorderUseCase
       - package: DecoyPackage
         product: Broadcaster
       - package: DecoyPackage

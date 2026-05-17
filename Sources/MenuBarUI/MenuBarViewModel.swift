@@ -1,7 +1,7 @@
 import Broadcaster
+import Dependencies
 import Domain
 import Foundation
-import Recorder
 import SwiftUI
 
 /// View-model backing the menu-bar UI. Owns the displayed
@@ -9,18 +9,20 @@ import SwiftUI
 /// the View calls into.
 ///
 /// State refresh strategy: `RecordingState` and `OutputMode` are not
-/// carried by `Recorder.Event` / `Broadcaster.Event` (those streams
+/// carried by `RecorderEvent` / `Broadcaster.Event` (those streams
 /// surface I/O failures, not transitions). After every dispatch and on
 /// every event arrival, the view-model reads the actors' authoritative
 /// `state` properties back. This keeps the UI in lockstep with the
 /// underlying actors without inventing a parallel state machine.
 ///
-/// Lifetimes: each `Subscription` token is held by its iterating Task
-/// (as a local `let token` retained by the `for await` loop). The
-/// view-model stores only the Tasks themselves. On `deinit` we cancel
-/// the Tasks; cancellation ends iteration, the `token` local drops,
-/// and the deinit-driven cleanup on `Subscription` releases the
-/// actor-side subscriber slot.
+/// Lifetimes: the recorder event task iterates a passive
+/// `RecorderEvents` value facade and uses `defer { Task { await
+/// events.cancel() } }` so the actor-side subscriber slot is released
+/// whether the task ends naturally, is cancelled before iteration
+/// begins, or is cancelled mid-iteration. The broadcaster path keeps
+/// the same shape via its own `Subscription` token. On `deinit` we
+/// cancel both Tasks; cancellation fires the `defer` cleanup which
+/// hops back into the actor to release the slot.
 @MainActor
 public final class MenuBarViewModel: ObservableObject {
     @Published public private(set) var recordingState: RecordingState = .idle
@@ -35,7 +37,7 @@ public final class MenuBarViewModel: ObservableObject {
     /// auto-clears so brief failures don't get lost in a refresh storm.
     @Published public var lastErrorMessage: String?
 
-    private let recorder: Recorder
+    @Dependency(\.recorder) private var recorder
     private let broadcaster: Broadcaster
     private let dispatcher: any AppCommandDispatching
 
@@ -43,11 +45,9 @@ public final class MenuBarViewModel: ObservableObject {
     private var broadcasterEventTask: Task<Void, Never>?
 
     public init(
-        recorder: Recorder,
         broadcaster: Broadcaster,
         dispatcher: any AppCommandDispatching
     ) {
-        self.recorder = recorder
         self.broadcaster = broadcaster
         self.dispatcher = dispatcher
     }
@@ -120,15 +120,15 @@ extension MenuBarViewModel {
         outputMode = await broadcaster.state
     }
 
-    /// Spawns the recorder-event consumer. Iteration retains the
-    /// `Subscription` via its iterator (see `Recorder.Subscription`),
-    /// so the slot is released deterministically when the Task is
-    /// cancelled in `deinit` or torn down by a subsequent `start()`.
     private func makeRecorderEventTask() -> Task<Void, Never> {
-        let subscription = Task { [recorder] in await recorder.subscribeEvents() }
+        let recorder = self.recorder
         return Task { [weak self] in
-            let token = await subscription.value
-            for await event in token {
+            let events = await recorder.subscribeEvents()
+            // Cleanup must run even if this Task is cancelled before
+            // `for await` is entered. Otherwise the actor-side subscriber
+            // slot leaks across `start()`'s cancel→recreate cycle.
+            defer { Task { await events.cancel() } }
+            for await event in events {
                 await self?.handleRecorderEvent(event)
             }
         }
@@ -144,7 +144,7 @@ extension MenuBarViewModel {
         }
     }
 
-    private func handleRecorderEvent(_ event: Recorder.Event) async {
+    private func handleRecorderEvent(_ event: RecorderEvent) async {
         switch event {
         case .saved:
             await refreshState()

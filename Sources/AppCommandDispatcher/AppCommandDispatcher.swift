@@ -1,10 +1,10 @@
 import Broadcaster
+import Dependencies
 import Domain
-import Recorder
 
 /// Fan-out point for `AppCommand`. UI / keyboard adapters publish one
 /// `AppCommand`; the dispatcher hands it concurrently to both
-/// `Recorder` and `Broadcaster` so each actor can decide what (if
+/// `RecorderUseCase` and `Broadcaster` so each actor can decide what (if
 /// anything) the command means for its own state.
 ///
 /// Why `struct` instead of `actor`: the dispatcher holds zero mutable
@@ -14,16 +14,15 @@ import Recorder
 /// hop without buying any invariant.
 ///
 /// Concurrency model: `async let` spawns two child tasks that hop into
-/// the Recorder and Broadcaster actors independently. `dispatch`
+/// the recorder and broadcaster actors independently. `dispatch`
 /// returns only after both have completed their `handle` call, which is
 /// the structural guarantee callers want — "the command has been
 /// observed by both sides".
 public struct AppCommandDispatcher: Sendable {
-    private let recorder: Recorder
+    @Dependency(\.recorder) private var recorder
     private let broadcaster: Broadcaster
 
-    public init(recorder: Recorder, broadcaster: Broadcaster) {
-        self.recorder = recorder
+    public init(broadcaster: Broadcaster) {
         self.broadcaster = broadcaster
     }
 
