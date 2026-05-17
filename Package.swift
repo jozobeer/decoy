@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "Decoy", targets: ["Decoy"]),
+        .library(name: "Entity", targets: ["Entity"]),
         .library(name: "Domain", targets: ["Domain"]),
         .library(name: "Recorder", targets: ["Recorder"]),
         .library(name: "Broadcaster", targets: ["Broadcaster"]),
@@ -75,9 +76,11 @@ let package = Package(
                 "AppCommandDispatcher",
             ]
         ),
+        .target(name: "Entity"),
         .target(
             name: "Domain",
             dependencies: [
+                "Entity",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
