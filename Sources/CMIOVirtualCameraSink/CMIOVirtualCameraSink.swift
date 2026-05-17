@@ -1,5 +1,4 @@
 import Domain
-import Foundation
 
 /// `VirtualCameraSink` の本番実装 ― `FrameTransport` (#43) 経由で
 /// Camera Extension に frame を送る adapter。
