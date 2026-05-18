@@ -14,8 +14,11 @@ name: Release
 #   APPLE_APP_PASSWORD              app-specific password
 #
 # Settings → Environments → release → Deployment branches and tags:
-#   "Selected branches and tags" を選び、Pattern `refs/tags/v*` のみ許可。
-#   こうすれば workflow_dispatch で branch ref を選んでも secrets が解放されず、
+#   "Selected branches and tags" を選び、`Ref type: Tag` + `Name pattern: v*` のみ許可。
+#   GitHub の deployment protection rule は `refs/tags/` プレフィックス無しの
+#   bare な branch/tag 名 pattern を取るので、`v*` (or 厳密化したい場合は
+#   `v[0-9]*.[0-9]*.[0-9]*`) を使うこと ― `refs/tags/v*` だと一切 match しない。
+#   この設定により workflow_dispatch で branch ref を選んでも secrets が解放されず、
 #   secret 漏洩経路を tag-triggered run だけに絞れる。
 #
 # Security note:
@@ -243,10 +246,19 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
         run: |
-          xcrun notarytool submit "$DMG_PATH" \
+          # secret を `--password` で submit に直渡しすると、--wait で notarize 完了まで
+          # 数分間 argv が `ps` で観測可能になる。`notarytool store-credentials` で
+          # 一時 keychain に profile として保存し、submit は profile 参照のみにする。
+          # store-credentials 自体は msec で終わるため、argv 露出 window が大幅に短縮される。
+          PROFILE_NAME="decoy-notary-${GITHUB_RUN_ID}"
+          xcrun notarytool store-credentials "$PROFILE_NAME" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_DEVELOPMENT_TEAM" \
+            --keychain "$KEYCHAIN_PATH"
+          xcrun notarytool submit "$DMG_PATH" \
+            --keychain-profile "$PROFILE_NAME" \
+            --keychain "$KEYCHAIN_PATH" \
             --wait
 
       - name: Staple notarization ticket
