@@ -60,11 +60,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          # SemVer 2.0 ベース: prerelease / build は dot-separated alnum/`-` identifier。
-          # 空 identifier / 連続ドット / 単独ドット で始まる/終わる segment を弾く。
+          # SemVer 2.0 ベース: major.minor.patch は leading zero を禁止 (0 か 1-9 で始まる)。
+          # prerelease / build は dot-separated alnum/`-` identifier。空 identifier 不可。
           # OK: v0.1.0, v1.2.3-rc.1, v1.0.0+build.42, v0.0.0-test1, v1.2.3-rc.1+sha.abc
-          # NG: v1.0/rc1, v0.1..0, v1.0.0-, v1.0.0-.foo, v1.0.0+, v1.0.0-.+.
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?$ ]]; then
+          # NG: v01.2.3, v1.0/rc1, v0.1..0, v1.0.0-, v1.0.0-.foo, v1.0.0+, v1.0.0-.+.
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?$ ]]; then
             echo "::error::TAG '$TAG' does not match SemVer 2.0 shape v<major>.<minor>.<patch>[-prerelease][+build]"
             exit 1
           fi
@@ -118,6 +118,11 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
         run: |
           ARCHIVE_PATH="$RUNNER_TEMP/Decoy.xcarchive"
+          # MARKETING_VERSION ― TAG の `v` prefix を剥がして CFBundleShortVersionString に注入。
+          # CURRENT_PROJECT_VERSION ― github.run_number で build 番号を monotonic に。
+          # Info.plist は $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION) placeholder を持つ。
+          MARKETING_VERSION="${TAG#v}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
           # project.yml は debug build を ad-hoc ("-") に固定する。release では
           # CODE_SIGN_STYLE=Automatic + DEVELOPMENT_TEAM を inject して Xcode に
           # keychain 内の Developer ID Application identity を resolve させる。
@@ -131,7 +136,9 @@ jobs:
             -destination 'generic/platform=macOS' \
             -archivePath "$ARCHIVE_PATH" \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM"
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
       - name: Export signed .app from archive
@@ -207,6 +214,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # prerelease 判定: TAG に `-` segment があれば prerelease 扱い (v1.2.3-rc.1 等)。
+          # GitHub Release の prerelease flag を draft 時点で立てておかないと、publish 時に
+          # うっかり stable 扱いで公開される事故が起きる。
+          PRERELEASE_FLAG=()
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE_FLAG=(--prerelease)
+          fi
           # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
           # (workflow_dispatch で typo した tag が draft release を勝手に新規作成する事故を防ぐ)。
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -222,7 +236,8 @@ jobs:
               --title "$TAG" \
               --generate-notes \
               --draft \
-              --verify-tag
+              --verify-tag \
+              "${PRERELEASE_FLAG[@]}"
           fi
           gh release upload "$TAG" "$DMG_PATH" --clobber
 
