@@ -24,16 +24,18 @@ name: Release
 #   この設定により workflow_dispatch で branch ref を選んでも secrets が解放されず、
 #   secret 漏洩経路を tag-triggered run だけに絞れる。
 #
-# Security note:
+# Security note (shell expansion / secret exposure 面のみを論じる):
 # - 外部入力で本 workflow が受け取るのは TAG (push tag or workflow_dispatch input) のみ。
 #   PR title / body / commit message 等は一切参照しない (command injection 面なし)。
-# - TAG は最初に `Validate tag shape` step (secret-free + quoted expansion) で
-#   SemVer 厳密 regex に通し、形が崩れていれば即 abort する。malformed TAG が
-#   shell に展開され得るのはこの secret-free な validation step 内に限られ、
-#   後段の secret-injected step には regex を通った形のみが届く。
-# - 続く `Abort if release tag is already published` も GH_TOKEN のみで動く
-#   secret-free step。signing/notarization secrets を materialize する前に
-#   published tag 再 run を弾けるよう、secrets verify より前に置いてある。
+# - TAG の shell 展開順: 最初に shell へ展開する step は `Validate tag shape` で、
+#   この step は signing/notarization secrets 非注入かつ quoted expansion で受け取る。
+#   regex を通った形だけが後段の secret-injected step に届くので、malformed TAG が
+#   Developer ID / notarization 秘密と同時に shell に存在することはない。
+#   ※ actions/checkout は TAG を shell に展開せず git ref として消費するだけなので、
+#   shell expansion 面では validation の前段にあっても上記保証を崩さない。
+# - `Abort if release tag is already published` は GH_TOKEN のみで動く
+#   (signing/notarization secrets は未注入)。これにより published tag への再 run を
+#   Developer ID / notarization 秘密が materialize される前に弾ける。
 # - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照する。
 
 on:
@@ -47,7 +49,9 @@ on:
         type: string
 
 # 同一 tag に対する push と manual dispatch の race を防ぐため、tag 名で group 化。
-# github.ref は manual dispatch では branch を指すため tag-aligned にならない。
+# workflow_dispatch では後段の guard が `github.ref_type == 'tag'` + `inputs.tag` 一致を
+# 必須化しているが、UI 上は branch ref からの起動も技術的には可能で github.ref_name が
+# branch 名になることがあるため、inputs.tag (= 必ず tag) を優先して同一 tag run を集約する。
 concurrency:
   group: release-${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
