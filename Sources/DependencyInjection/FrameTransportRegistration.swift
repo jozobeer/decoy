@@ -1,7 +1,9 @@
 import Dependencies
 import Domain
-import InMemoryFrameTransport
+import MachPortFrameTransport
 
 extension FrameTransportKey: DependencyKey {
-    public static let liveValue: any FrameTransport = InMemoryFrameTransport()
+    public static let liveValue: any FrameTransport = MachPortFrameTransport.live(
+        serviceName: FrameTransportServiceName.mach
+    )
 }
