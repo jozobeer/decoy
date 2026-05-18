@@ -24,6 +24,7 @@ let package = Package(
         .library(name: "InMemoryFrameTransport", targets: ["InMemoryFrameTransport"]),
         .library(name: "CMIOVirtualCameraSink", targets: ["CMIOVirtualCameraSink"]),
         .library(name: "IOSurfaceFactory", targets: ["IOSurfaceFactory"]),
+        .library(name: "MachPortFrameTransport", targets: ["MachPortFrameTransport"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -110,6 +111,13 @@ let package = Package(
         .target(name: "CMIOVirtualCameraSink", dependencies: ["Domain"]),
         .target(name: "IOSurfaceFactory"),
         .target(
+            name: "MachPortFrameTransport",
+            dependencies: [
+                "Domain",
+                "IOSurfaceFactory",
+            ]
+        ),
+        .target(
             name: "HotkeyService",
             dependencies: [
                 "Domain",
@@ -193,6 +201,13 @@ let package = Package(
         .testTarget(name: "InMemoryFrameTransportTests", dependencies: ["InMemoryFrameTransport", "Domain"]),
         .testTarget(name: "CMIOVirtualCameraSinkTests", dependencies: ["CMIOVirtualCameraSink", "InMemoryFrameTransport", "Domain"]),
         .testTarget(name: "IOSurfaceFactoryTests", dependencies: ["IOSurfaceFactory"]),
+        .testTarget(
+            name: "MachPortFrameTransportTests",
+            dependencies: [
+                "MachPortFrameTransport",
+                "Domain",
+            ]
+        ),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
             name: "MenuBarUITests",

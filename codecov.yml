@@ -43,6 +43,13 @@ ignore:
   - "Sources/SystemExtensionInstaller/OSSystemExtensionActivator.swift"
   # live-wiring 専用 file ― live activator を組み合わせるだけ
   - "Sources/SystemExtensionInstaller/SystemExtensionInstaller+Live.swift"
+  # Mach bootstrap / mach_msg / IOSurface mach port は実 IPC pair でしか
+  # exercise できない ― orchestrator (`MachPortFrameTransport.swift`) の
+  # 状態機械は in-process fake で coverage 済み。
+  - "Sources/MachPortFrameTransport/BootstrapMachPortLookup.swift"
+  - "Sources/MachPortFrameTransport/MachPortMessageSender.swift"
+  # live-wiring 専用 file ― bootstrap lookup + message sender を結線するだけ
+  - "Sources/MachPortFrameTransport/MachPortFrameTransport+Live.swift"
   # in-memory stub ― テストプレースホルダのみ
   - "Sources/InMemorySystemExtensionInstaller/**"
   # Decoy は Orchestrator ― actor / dispatcher / view-model を組み立てる
