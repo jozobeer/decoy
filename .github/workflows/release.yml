@@ -1,0 +1,387 @@
+name: Release
+
+# Decoy.app を Developer ID signed + notarized で release する。
+# Trigger:
+#   - push tag `v*` (e.g. `v0.1.0`)
+#   - workflow_dispatch (tag input 必須 ― CI 上で再実行する用)
+#
+# Required GitHub Environment ― 名前 "release" で作成し、以下 6 secrets を登録:
+#   MACOS_CERTIFICATE_P12           base64-encoded P12 (Developer ID Application)
+#   MACOS_CERTIFICATE_PASSWORD      P12 export password
+#   MACOS_KEYCHAIN_PASSWORD         ephemeral keychain password (任意の文字列でよい)
+#   APPLE_DEVELOPMENT_TEAM          Apple Developer Team ID (10 文字英数字)
+#   APPLE_ID                        notarization 用 Apple ID
+#   APPLE_APP_PASSWORD              app-specific password
+#
+# Settings → Environments → release → Deployment branches and tags:
+#   "Selected branches and tags" を選び、`Ref type: Tag` + `Name pattern: v*` のみ許可。
+#   GitHub の deployment protection rule は `refs/tags/` プレフィックス無しの
+#   bare な tag 名 glob pattern を取るので、`v*` を使うこと ― `refs/tags/v*` だと
+#   一切 match しない。なお GitHub の pattern は glob (not regex) のため、
+#   `v[0-9]*` のような書き方も `[0-9]` 直後の `*` が任意文字列に展開されて
+#   `v1foo.2bar` 等も通すので、SemVer 厳密マッチは glob では不可能。
+#   厳密性は本 workflow 内の SemVer regex validation step で担保する。
+#   この設定により workflow_dispatch で branch ref を選んでも secrets が解放されず、
+#   secret 漏洩経路を tag-triggered run だけに絞れる。
+#
+# Security note (shell expansion / secret exposure 面のみを論じる):
+# - 外部入力で本 workflow が受け取るのは TAG (push tag or workflow_dispatch input) のみ。
+#   PR title / body / commit message 等は一切参照しない (command injection 面なし)。
+# - TAG の shell 展開順: 最初に shell へ展開する step は `Validate tag shape` で、
+#   この step は signing/notarization secrets 非注入かつ quoted expansion で受け取る。
+#   regex を通った形だけが後段の secret-injected step に届くので、malformed TAG が
+#   Developer ID / notarization 秘密と同時に shell に存在することはない。
+#   ※ actions/checkout は TAG を shell に展開せず git ref として消費するだけなので、
+#   shell expansion 面では validation の前段にあっても上記保証を崩さない。
+# - `Abort if release tag is already published` は GH_TOKEN のみで動く
+#   (signing/notarization secrets は未注入)。これにより published tag への再 run を
+#   Developer ID / notarization 秘密が materialize される前に弾ける。
+# - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照する。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+        type: string
+
+# 同一 tag に対する push と manual dispatch の race を防ぐため、tag 名で group 化。
+# workflow_dispatch では後段の guard が `github.ref_type == 'tag'` + `inputs.tag` 一致を
+# 必須化しているが、UI 上は branch ref からの起動も技術的には可能で github.ref_name が
+# branch 名になることがあるため、inputs.tag (= 必ず tag) を優先して同一 tag run を集約する。
+concurrency:
+  group: release-${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    # GitHub Environment 経由で secrets を解放。env 側の deployment protection で
+    # `Ref type: Tag` + `Name pattern: v*` のみ許可することで、workflow_dispatch の
+    # branch ref では secrets が渡らず Developer ID / notarization の信任が漏れない。
+    # ※ deployment rule は bare な tag 名 pattern を取るので、`refs/tags/` プレフィックスは
+    # 付けないこと (詳細は header コメント参照)。
+    environment: release
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      # checkout ref は github.ref_name のみから派生させる ― push tag では起動 ref = tag、
+      # workflow_dispatch では UI 選択 ref = environment-approved ref であり、いずれの
+      # 場合も「approval を受けた ref」と一致する。`refs/tags/` 修飾で同名 branch と
+      # 衝突しないことも保証する。inputs.tag を直接使うと、approved ref と異なる任意の
+      # tag を fetch できてしまう (後段の workflow_dispatch ref guard より前に走るため)。
+      # inputs.tag と github.ref_name の一致は別 step で必須化する。
+      # persist-credentials: false ― default では git config に GITHUB_TOKEN が
+      # 焼き込まれるが、本 job は contents: write を持ち xcodebuild が build phase /
+      # SPM plugin から token を読める導線がある。release artifact 生成 phase に
+      # token は不要なので明示 OFF する。
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          persist-credentials: false
+
+      # validation を 2 step に分離 ― defense-in-depth として、malformed TAG が万一
+      # 弾けた場合でも shell に secrets が露出しないよう、shape check は secret-free 化。
+      - name: Validate tag shape
+        run: |
+          # SemVer 2.0 ベース: major.minor.patch は leading zero を禁止 (0 か 1-9 で始まる)。
+          # prerelease / build は dot-separated alnum/`-` identifier。空 identifier 不可。
+          # OK: v0.1.0, v1.2.3-rc.1, v1.0.0+build.42, v0.0.0-test1, v1.2.3-rc.1+sha.abc
+          # NG: v01.2.3, v1.0/rc1, v0.1..0, v1.0.0-, v1.0.0-.foo, v1.0.0+, v1.0.0-.+.
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?$ ]]; then
+            echo "::error::TAG '$TAG' does not match SemVer 2.0 shape v<major>.<minor>.<patch>[-prerelease][+build]"
+            exit 1
+          fi
+
+      # workflow_dispatch では UI で選択した ref に対して GitHub Environment の deployment
+      # protection が照合される。inputs.tag が github.ref_name と乖離すると、ref A で
+      # 環境 approval を取って ref B の artifact を build / upload する経路ができてしまう。
+      # 両者の一致を必須化することで approval と artifact 出所の整合性を担保する。
+      - name: Verify workflow_dispatch ref matches inputs.tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          DISPATCH_REF_TYPE: ${{ github.ref_type }}
+          DISPATCH_REF_NAME: ${{ github.ref_name }}
+          DISPATCH_TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ "$DISPATCH_REF_TYPE" != "tag" ]; then
+            echo "::error::workflow_dispatch must be started from a tag ref (got: $DISPATCH_REF_TYPE)"
+            exit 1
+          fi
+          if [ "$DISPATCH_REF_NAME" != "$DISPATCH_TAG_INPUT" ]; then
+            echo "::error::ref/$DISPATCH_REF_NAME does not match inputs.tag=$DISPATCH_TAG_INPUT"
+            exit 1
+          fi
+
+      # published 済 tag への再 run は archive 開始前に abort したい。本 step は GH_TOKEN のみ
+      # で動くため、signing/notarization secrets を materialize する前にここを通すことで、
+      # 既 publish 済 tag に対しては Developer ID / notarization 秘密が一切 shell に流れない。
+      - name: Abort if release tag is already published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # archive / notarize は数十分 + macOS runner 時間を食う。published 済 release を
+          # 上書きしないという守りは最終 upload step にもあるが、ここで早期 abort することで
+          # 無駄な runner 時間と sign 経路の発火を避ける。
+          # fail-closed 設計: 404 (release 未作成) のみ「進めて OK」とし、auth / rate-limit /
+          # transient API error はすべて abort する。`gh release view` だと exit code が
+          # error と not-found を区別しないため、REST API で HTTP status を直接判定する。
+          set +e
+          response=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" -i 2>&1)
+          rc=$?
+          set -e
+          http_status=$(printf '%s\n' "$response" | awk 'NR==1 {print $2; exit}')
+          case "$http_status" in
+            200)
+              is_draft=$(printf '%s\n' "$response" | sed -n '/^{/,$p' | jq -r .draft)
+              if [ "$is_draft" != "true" ]; then
+                echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+                exit 1
+              fi
+              ;;
+            404)
+              # 未作成 ― 後段 upload step が draft で create する
+              ;;
+            *)
+              echo "::error::Failed to query release status for $TAG (HTTP $http_status, rc=$rc):"
+              printf '%s\n' "$response" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify required secrets
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          missing=()
+          [ -z "$MACOS_CERTIFICATE_P12" ] && missing+=(MACOS_CERTIFICATE_P12)
+          [ -z "$MACOS_CERTIFICATE_PASSWORD" ] && missing+=(MACOS_CERTIFICATE_PASSWORD)
+          [ -z "$MACOS_KEYCHAIN_PASSWORD" ] && missing+=(MACOS_KEYCHAIN_PASSWORD)
+          [ -z "$APPLE_DEVELOPMENT_TEAM" ] && missing+=(APPLE_DEVELOPMENT_TEAM)
+          [ -z "$APPLE_ID" ] && missing+=(APPLE_ID)
+          [ -z "$APPLE_APP_PASSWORD" ] && missing+=(APPLE_APP_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Install xcodegen and create-dmg
+        run: brew install xcodegen create-dmg
+
+      - name: Generate Decoy.xcodeproj
+        run: xcodegen generate
+
+      - name: Inject version into Info.plist
+        run: |
+          # CFBundleShortVersionString は SemVer 数値部 (x.y.z) のみ ― Apple の仕様で
+          # prerelease/build suffix を含めると notarize / store でリジェクトされ得る。
+          # GitHub run number を CFBundleVersion (build number) に monotonic 注入。
+          # source plist は SPM 経由の `swift run` 用に literal を保持し、release では
+          # ここで PlistBuddy で上書きする ($(MARKETING_VERSION) placeholder は
+          # Package.swift の `-sectcreate __TEXT __info_plist` で展開されないため避ける)。
+          CORE_VERSION="${TAG#v}"
+          CORE_VERSION="${CORE_VERSION%%-*}"
+          CORE_VERSION="${CORE_VERSION%%+*}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
+          for plist in Sources/Decoy/Info.plist Apps/DecoyCameraExtension/Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $CORE_VERSION" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$plist"
+          done
+
+      - name: Import signing certificate into temporary keychain
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          # P12 file は途中 step が失敗しても必ず消す ― private key の disk 滞留を防ぐ。
+          trap 'rm -f "$CERT_PATH"' EXIT
+          # macOS BSD base64 は GNU 風 `--decode` の互換性が不安定 ― `-D` (BSD) で
+          # decode し、stdout を file redirect で書き出す (`-o` も BSD では非サポート)。
+          echo "$MACOS_CERTIFICATE_P12" | base64 -D > "$CERT_PATH"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # create-keychain が success した時点で cleanup step が見つけられるよう
+          # 後続 (set-keychain-settings / import / list-keychains 等) が失敗しても
+          # KEYCHAIN_PATH は GITHUB_ENV に書き出しておく。
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # -t agg ― .p12 は cert + private key の aggregate identity bundle。
+          # -t cert だと cert のみ取り込まれ codesign が "no identity" で失敗する。
+          security import "$CERT_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t agg -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Archive Decoy.app
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/Decoy.xcarchive"
+          # version 注入は前段の "Inject version into Info.plist" で完了済。
+          # project.yml は debug build を ad-hoc ("-") に固定する。release では
+          # CODE_SIGN_STYLE=Automatic + DEVELOPMENT_TEAM を inject して Xcode に
+          # keychain 内の Developer ID Application identity を resolve させる。
+          # TODO(#76): SystemExtension が要求する制約付き entitlement のため、
+          # 初回 v* tag push で archive が profile 不足で落ちる可能性が高い。
+          # Developer ID provisioning profile import + manual signing への切替を別 PR で追加。
+          xcodebuild archive \
+            -project Decoy.xcodeproj \
+            -scheme Decoy \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM"
+          echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
+
+      - name: Export signed .app from archive
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          EXPORT_DIR="$RUNNER_TEMP/export"
+          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+          # signingStyle=automatic + developer-id method で Xcode が SystemExtension
+          # を含む embedded targets の profile を自動 resolve する。
+          cat > "$EXPORT_OPTIONS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>teamID</key>
+            <string>__APPLE_DEVELOPMENT_TEAM__</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+          # team ID をプレースホルダ経由で挿入し、heredoc 内に secret を直接書かない
+          /usr/bin/sed -i '' "s/__APPLE_DEVELOPMENT_TEAM__/$APPLE_DEVELOPMENT_TEAM/" "$EXPORT_OPTIONS"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist "$EXPORT_OPTIONS"
+          APP_PATH="$EXPORT_DIR/Decoy.app"
+          [ -d "$APP_PATH" ] || { echo "::error::Decoy.app not found at $APP_PATH"; exit 1; }
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "EXPORT_DIR=$EXPORT_DIR" >> "$GITHUB_ENV"
+
+      - name: Create DMG
+        run: |
+          # TAG は SemVer regex で validate 済 ― path injection の余地なし。
+          # --codesign で DMG container 自体を Developer ID Application で署名する。
+          # 後続の stapler / spctl --context primary-signature は DMG 本体の署名を
+          # 前提とするので、ここで sign しないと notarize ticket が staple できず
+          # spctl assess も "no signature" で落ちる。
+          DMG_PATH="$RUNNER_TEMP/Decoy-${TAG}.dmg"
+          create-dmg \
+            --volname "Decoy ${TAG}" \
+            --window-size 540 380 \
+            --icon-size 96 \
+            --icon "Decoy.app" 140 190 \
+            --app-drop-link 400 190 \
+            --no-internet-enable \
+            --codesign "Developer ID Application" \
+            "$DMG_PATH" \
+            "$EXPORT_DIR"
+          [ -f "$DMG_PATH" ] || { echo "::error::DMG not created at $DMG_PATH"; exit 1; }
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          # secret を `--password` で submit に直渡しすると、--wait で notarize 完了まで
+          # 数分間 argv が `ps` で観測可能になる。`notarytool store-credentials` で
+          # 一時 keychain に profile として保存し、submit は profile 参照のみにする。
+          # store-credentials 自体は msec で終わるため、argv 露出 window が大幅に短縮される。
+          PROFILE_NAME="decoy-notary-${GITHUB_RUN_ID}"
+          xcrun notarytool store-credentials "$PROFILE_NAME" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_DEVELOPMENT_TEAM" \
+            --keychain "$KEYCHAIN_PATH"
+          xcrun notarytool submit "$DMG_PATH" \
+            --keychain-profile "$PROFILE_NAME" \
+            --keychain "$KEYCHAIN_PATH" \
+            --wait
+
+      - name: Staple notarization ticket
+        run: xcrun stapler staple "$DMG_PATH"
+
+      - name: Verify Gatekeeper acceptance
+        run: |
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # prerelease 判定: build metadata (`+segment`) 内の hyphen は prerelease ではないので
+          # 先に `+` 以降を切り落としてから `-` の有無を見る。
+          # 例: v1.0.0+build-foo は prerelease=false, v1.2.3-rc.1+sha は prerelease=true。
+          TAG_NO_BUILD="${TAG%%+*}"
+          if [[ "$TAG_NO_BUILD" == *-* ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+          # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
+          # (workflow_dispatch で typo した tag が draft release を勝手に新規作成する事故を防ぐ)。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 既存 release が published 済 (draft でない) なら、public asset を
+            # silently 上書きするのは事故のもと ― 明示削除を要求する。
+            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+              exit 1
+            fi
+            # 既存 draft の isPrerelease が TAG 形状と乖離している可能性 (古い workflow の残骸 /
+            # 手動作成 draft 等)。後段で publish したとき RC が正規 release として表に出る事故を
+            # 防ぐため、TAG 形状ベースの値で update する。
+            # gh release edit の `--prerelease=false` 構文は gh CLI version 依存で
+            # brittle なので、REST API で確実に PATCH する。
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq .id)
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
+              -F prerelease="$IS_PRERELEASE" >/dev/null
+          else
+            PRERELEASE_FLAG=()
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              PRERELEASE_FLAG=(--prerelease)
+            fi
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --draft \
+              --verify-tag \
+              "${PRERELEASE_FLAG[@]}"
+          fi
+          gh release upload "$TAG" "$DMG_PATH" --clobber
+
+      - name: Cleanup temporary keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
