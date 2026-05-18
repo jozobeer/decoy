@@ -50,6 +50,14 @@ ignore:
   - "Sources/MachPortFrameTransport/MachPortMessageSender.swift"
   # live-wiring 専用 file ― bootstrap lookup + message sender を結線するだけ
   - "Sources/MachPortFrameTransport/MachPortFrameTransport+Live.swift"
+  # receiver 側 OS-direct な部分 ― launchd + 実 Mach port + 実 IOSurface
+  # を要求するためユニットテスト不能。orchestrator
+  # (`MachPortFrameReceiver.swift`) は in-process fake で coverage 済み。
+  - "Sources/MachPortFrameReceiver/BootstrapMachPortCheckIn.swift"
+  - "Sources/MachPortFrameReceiver/MachPortRecvLoop.swift"
+  - "Sources/MachPortFrameReceiver/IOSurfaceLookupMaterializer.swift"
+  # live-wiring 専用 file ― check-in + materializer を結線するだけ
+  - "Sources/MachPortFrameReceiver/MachPortFrameReceiver+Live.swift"
   # in-memory stub ― テストプレースホルダのみ
   - "Sources/InMemorySystemExtensionInstaller/**"
   # Decoy は Orchestrator ― actor / dispatcher / view-model を組み立てる
