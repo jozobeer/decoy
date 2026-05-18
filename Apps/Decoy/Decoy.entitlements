@@ -6,5 +6,13 @@
 	<true/>
 	<key>com.apple.security.device.camera</key>
 	<true/>
+	<!-- extension (MachPortFrameReceiver) が bootstrap_check_in で登録した
+	     Mach service に bootstrap_look_up でアクセスするための許可。
+	     service 名は Domain の FrameTransportServiceName.mach と一致させる。
+	     extension 側 entitlements の mach-register.global-name と対を成す。 -->
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>beer.jozo.decoy.frameTransport</string>
+	</array>
 </dict>
 </plist>

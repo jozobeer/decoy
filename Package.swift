@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "IOSurfaceFactory", targets: ["IOSurfaceFactory"]),
         .library(name: "MachPortFrameTransport", targets: ["MachPortFrameTransport"]),
         .library(name: "MachPortFrameReceiver", targets: ["MachPortFrameReceiver"]),
+        .library(name: "FrameSampleBufferAdapter", targets: ["FrameSampleBufferAdapter"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -126,6 +127,12 @@ let package = Package(
             ]
         ),
         .target(
+            name: "FrameSampleBufferAdapter",
+            dependencies: [
+                "Domain",
+            ]
+        ),
+        .target(
             name: "HotkeyService",
             dependencies: [
                 "Domain",
@@ -220,6 +227,13 @@ let package = Package(
             name: "MachPortFrameReceiverTests",
             dependencies: [
                 "MachPortFrameReceiver",
+                "Domain",
+            ]
+        ),
+        .testTarget(
+            name: "FrameSampleBufferAdapterTests",
+            dependencies: [
+                "FrameSampleBufferAdapter",
                 "Domain",
             ]
         ),

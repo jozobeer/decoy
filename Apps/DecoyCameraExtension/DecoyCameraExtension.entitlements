@@ -6,5 +6,14 @@
 	<true/>
 	<key>com.apple.cmio.extension.providerSource</key>
 	<true/>
+	<!-- host (MachPortFrameTransport) が bootstrap_look_up する Mach service を、
+	     extension が bootstrap_check_in で launchd に登録するための許可。
+	     service 名は Domain の FrameTransportServiceName.mach と一致させる。
+	     片方を変更したら両方更新が必要 ― mismatch すると silent に
+	     bootstrap_look_up が失敗し host の .sendFailed 経路が無限発火する。 -->
+	<key>com.apple.security.temporary-exception.mach-register.global-name</key>
+	<array>
+		<string>beer.jozo.decoy.frameTransport</string>
+	</array>
 </dict>
 </plist>

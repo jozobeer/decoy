@@ -88,6 +88,19 @@ targets:
       - path: Apps/DecoyCameraExtension
         excludes:
           - Info.plist
+    # host (Broadcaster) → MachPortFrameTransport → MachPortFrameReceiver
+    # → DecoyCameraExtensionStreamSource → CMIOExtensionStream の経路を
+    # extension 側で組み立てるため、SPM library を直接 link する。
+    # Domain は FrameTransportServiceName.mach 定数 (host / extension が握る
+    # service name) と Frame entity 経路のため、MachPortFrameReceiver は
+    # 受信 actor、FrameSampleBufferAdapter は Frame → CMSampleBuffer 変換。
+    dependencies:
+      - package: DecoyPackage
+        product: Domain
+      - package: DecoyPackage
+        product: MachPortFrameReceiver
+      - package: DecoyPackage
+        product: FrameSampleBufferAdapter
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: beer.jozo.decoy.CameraExtension
