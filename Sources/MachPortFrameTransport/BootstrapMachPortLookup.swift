@@ -30,6 +30,11 @@ extension BootstrapMachPortLookup {
         guard bootstrapResult == KERN_SUCCESS else {
             throw MachPortTransportError.lookupFailed(serviceName: serviceName, code: Int(bootstrapResult))
         }
+        // `task_get_special_port` は bootstrap port の send right を渡す ―
+        // caller (この関数) に release 責任があり、放置するとプロセス毎の
+        // port table を消費し続ける。lookup 成否どちらでも一度ずつ確実に
+        // 解放するため defer に積む。
+        defer { _ = mach_port_deallocate(mach_task_self_, bp) }
         var port: mach_port_t = mach_port_t(MACH_PORT_NULL)
         let result = serviceName.withCString { cName in
             decoy_bootstrap_look_up(bp, cName, &port)

@@ -32,11 +32,16 @@ public protocol MachPortSender: Sendable {
     func release(port: MachPortToken) async
 }
 
-/// Errors the lookup / sender layer can raise. The actor wraps these
-/// into `FrameTransportError.transport(reason:)` before re-throwing,
-/// so callers see the Domain-level error type while still getting the
-/// raw cause for logging.
+/// Errors the lookup / sender layer can raise. The actor maps these
+/// into Domain-level `FrameTransportError` before re-throwing.
+///
+/// `destinationLost` is a sentinel for "the receiver port is gone"
+/// (`MACH_SEND_INVALID_DEST` on the wire) ― the actor reacts by
+/// resetting its state to disconnected and surfacing the contract-
+/// level `FrameTransportError.disconnectedDuringSend`, distinct from
+/// generic `transport(reason:)` failures.
 public enum MachPortTransportError: Error, Sendable, Equatable {
     case lookupFailed(serviceName: String, code: Int)
     case sendFailed(code: Int)
+    case destinationLost(code: Int)
 }

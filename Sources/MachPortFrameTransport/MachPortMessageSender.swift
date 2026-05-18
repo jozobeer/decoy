@@ -82,6 +82,13 @@ extension MachPortMessageSender {
             // mach_msg failed before MOVE_SEND took effect ― our send
             // right is still alive and would leak. Deallocate explicitly.
             _ = mach_port_deallocate(mach_task_self_, surfacePort)
+            // `MACH_SEND_INVALID_DEST` は「相手 port が居ない」のサイン ―
+            // generic `sendFailed` ではなく `destinationLost` に倒し、
+            // orchestrator 側が `disconnectedDuringSend` に詰めて
+            // state を `.disconnected` に戻す経路を取れるようにする。
+            guard Int32(result) != MACH_SEND_INVALID_DEST else {
+                throw MachPortTransportError.destinationLost(code: Int(result))
+            }
             throw MachPortTransportError.sendFailed(code: Int(result))
         }
     }

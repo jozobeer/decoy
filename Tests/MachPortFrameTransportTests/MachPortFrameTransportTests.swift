@@ -181,6 +181,64 @@ struct MachPortFrameTransportTests {
     }
 
     @Test
+    func send_afterDisconnect_throwsDisconnectedDuringSend() async throws {
+        // disconnect 後に send を呼ぶと、まだ一度も接続していない
+        // (`notConnected`) のではなく「接続が切れた」
+        // (`disconnectedDuringSend`) と区別して通知される。
+        let sender = RecordingSender()
+        let transport = MachPortFrameTransport(
+            serviceName: "decoy.test",
+            lookup: SuccessLookup(token: MachPortToken(raw: 7)),
+            sender: sender
+        )
+        try await transport.connect()
+        await transport.disconnect()
+
+        await #expect(throws: FrameTransportError.disconnectedDuringSend) {
+            try await transport.send(Self.frame())
+        }
+    }
+
+    @Test
+    func send_destinationLost_throwsDisconnectedDuringSendAndBroadcastsDisconnected() async throws {
+        // sender が `destinationLost` (MACH_SEND_INVALID_DEST 相当) を
+        // 投げたら、orchestrator は state を `.disconnected` に戻して
+        // `.disconnected` を broadcast し、caller には
+        // `.disconnectedDuringSend` を投げる。
+        let transport = MachPortFrameTransport(
+            serviceName: "decoy.test",
+            lookup: SuccessLookup(token: MachPortToken(raw: 7)),
+            sender: DestinationLostSender()
+        )
+        try await transport.connect()
+        var iterator = await transport.events.makeAsyncIterator()
+        _ = await iterator.next() // .connected (replay)
+
+        await #expect(throws: FrameTransportError.disconnectedDuringSend) {
+            try await transport.send(Self.frame())
+        }
+        let observed = await iterator.next()
+        #expect(observed == .disconnected)
+    }
+
+    @Test
+    func connect_concurrent_singleLookupCall() async throws {
+        // 並行に複数の connect() が走っても、lookup は一度しか叩かれない
+        // (state が `.connecting` の間は短絡で no-op)。
+        let lookup = SlowSuccessLookup(token: MachPortToken(raw: 42))
+        let transport = MachPortFrameTransport(
+            serviceName: "decoy.test",
+            lookup: lookup,
+            sender: RecordingSender()
+        )
+        async let first: Void = transport.connect()
+        async let second: Void = transport.connect()
+        async let third: Void = transport.connect()
+        _ = try await (first, second, third)
+        #expect(await lookup.callCount == 1)
+    }
+
+    @Test
     func eventsStream_replayIgnoresTransientSendFailed() async throws {
         // `.sendFailed` は transient ― 「現在の接続状態」を表さないので
         // 新規 subscriber には replay されない。connect 直後に send 失敗
@@ -244,4 +302,32 @@ private struct FailingSender: MachPortSender {
         throw MachPortTransportError.sendFailed(code: -42)
     }
     func release(port: MachPortToken) async {}
+}
+
+private struct DestinationLostSender: MachPortSender {
+    func send(frame: Frame, via port: MachPortToken) async throws {
+        throw MachPortTransportError.destinationLost(code: -1000)
+    }
+    func release(port: MachPortToken) async {}
+}
+
+/// `connect()` の suspension 中に並行 connect が走るのを確実にするため、
+/// `Task.yield()` で複数回 await pointer を挟む。これにより最初の caller
+/// が `.connecting` state を握ったまま suspend し、後続の caller が
+/// no-op 経路に入ることを検証できる。
+private actor SlowSuccessLookup: MachPortLookup {
+    private let token: MachPortToken
+    private(set) var callCount: Int = 0
+
+    init(token: MachPortToken) {
+        self.token = token
+    }
+
+    func lookUp(serviceName: String) async throws -> MachPortToken {
+        callCount += 1
+        await Task.yield()
+        await Task.yield()
+        await Task.yield()
+        return token
+    }
 }
