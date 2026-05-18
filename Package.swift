@@ -25,6 +25,7 @@ let package = Package(
         .library(name: "CMIOVirtualCameraSink", targets: ["CMIOVirtualCameraSink"]),
         .library(name: "IOSurfaceFactory", targets: ["IOSurfaceFactory"]),
         .library(name: "MachPortFrameTransport", targets: ["MachPortFrameTransport"]),
+        .library(name: "MachPortFrameReceiver", targets: ["MachPortFrameReceiver"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -118,6 +119,13 @@ let package = Package(
             ]
         ),
         .target(
+            name: "MachPortFrameReceiver",
+            dependencies: [
+                "Domain",
+                "IOSurfaceFactory",
+            ]
+        ),
+        .target(
             name: "HotkeyService",
             dependencies: [
                 "Domain",
@@ -205,6 +213,13 @@ let package = Package(
             name: "MachPortFrameTransportTests",
             dependencies: [
                 "MachPortFrameTransport",
+                "Domain",
+            ]
+        ),
+        .testTarget(
+            name: "MachPortFrameReceiverTests",
+            dependencies: [
+                "MachPortFrameReceiver",
                 "Domain",
             ]
         ),
