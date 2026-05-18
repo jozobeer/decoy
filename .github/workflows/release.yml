@@ -9,7 +9,7 @@ name: Release
 #   MACOS_CERTIFICATE_P12           base64-encoded P12 (Developer ID Application)
 #   MACOS_CERTIFICATE_PASSWORD      P12 export password
 #   MACOS_KEYCHAIN_PASSWORD         ephemeral keychain password (任意の文字列でよい)
-#   APPLE_DEVELOPMENT_TEAM          Apple Developer Team ID (10桁)
+#   APPLE_DEVELOPMENT_TEAM          Apple Developer Team ID (10 文字英数字)
 #   APPLE_ID                        notarization 用 Apple ID
 #   APPLE_APP_PASSWORD              app-specific password
 #
@@ -75,9 +75,14 @@ jobs:
       # 焼き込まれるが、本 job は contents: write を持ち xcodebuild が build phase /
       # SPM plugin から token を読める導線がある。release artifact 生成 phase に
       # token は不要なので明示 OFF する。
+      # checkout ref は github.ref_name から派生させる ― push tag では起動 ref = tag、
+      # workflow_dispatch では UI 選択 ref = environment-approved ref であり、いずれの
+      # 場合も「approval を受けた ref」と一致する。inputs.tag を直接使うと、approved ref
+      # と異なる任意の tag を fetch できてしまう (後段の workflow_dispatch ref guard より
+      # 前に走るため)。inputs.tag と github.ref_name の一致は別 step で必須化する。
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: refs/tags/${{ github.ref_name }}
           persist-credentials: false
 
       # validation を 2 step に分離 ― defense-in-depth として、malformed TAG が万一
