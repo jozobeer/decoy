@@ -206,7 +206,6 @@ let package = Package(
             dependencies: [
                 "MachPortFrameTransport",
                 "Domain",
-                .product(name: "ConcurrencyExtras", package: "swift-concurrency-extras"),
             ]
         ),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),

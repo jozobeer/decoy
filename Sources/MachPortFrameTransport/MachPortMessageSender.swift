@@ -33,15 +33,24 @@ public struct MachPortMessageSender: MachPortSender {
 
 extension MachPortMessageSender {
     public func send(frame: Frame, via port: MachPortToken) async throws {
-        let surface = try IOSurfaceFactory.make(
+        // Current pipeline emits only BGRA frames (AVCameraSource pins
+        // pixelFormat to kCVPixelFormatType_32BGRA). Fail loudly if a
+        // non-BGRA frame slips through ― materialising with a hardcoded
+        // bytesPerElement would silently desync from the actual format.
+        guard frame.pixelFormat == 0x42475241 else {
+            throw MachPortTransportError.sendFailed(code: Int(KERN_INVALID_ARGUMENT))
+        }
+        let surface = try IOSurfaceFactory.makeBGRA(
             width: frame.width,
             height: frame.height,
-            pixelFormat: frame.pixelFormat,
-            bytesPerElement: 4,
-            bytesPerRow: frame.bytesPerRow,
             bytes: frame.pixelData
         )
-        guard let surfacePort = IOSurfaceCreateMachPort(surface) as mach_port_t? else {
+        // `IOSurfaceCreateMachPort` returns `mach_port_t` (not Optional);
+        // failure is `MACH_PORT_NULL` (0). Caller (this method) owns the
+        // returned send right and must release it if mach_msg fails ―
+        // MOVE_SEND only consumes the right on successful send.
+        let surfacePort = IOSurfaceCreateMachPort(surface)
+        guard surfacePort != mach_port_t(MACH_PORT_NULL) else {
             throw MachPortTransportError.sendFailed(code: Int(KERN_RESOURCE_SHORTAGE))
         }
         var message = FrameMachMessage()
@@ -70,6 +79,9 @@ extension MachPortMessageSender {
             )
         }
         guard result == MACH_MSG_SUCCESS else {
+            // mach_msg failed before MOVE_SEND took effect ― our send
+            // right is still alive and would leak. Deallocate explicitly.
+            _ = mach_port_deallocate(mach_task_self_, surfacePort)
             throw MachPortTransportError.sendFailed(code: Int(result))
         }
     }

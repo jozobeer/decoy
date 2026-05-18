@@ -32,7 +32,10 @@ public actor MachPortFrameTransport {
     private let lookup: any MachPortLookup
     private let sender: any MachPortSender
     private var connectedPort: MachPortToken?
-    private var lastEvent: FrameTransportEvent = .disconnected
+    /// 新規 subscriber に initial として replay する状態。`.sendFailed`
+    /// は transient な失敗イベントで「現在の接続状態」を表さないため
+    /// ここには反映しない ― 値は `.connected` か `.disconnected` のみ。
+    private var lastConnectionState: FrameTransportEvent = .disconnected
     private var continuations: [UUID: AsyncStream<FrameTransportEvent>.Continuation] = [:]
 
     public init(
@@ -51,7 +54,7 @@ extension MachPortFrameTransport: FrameTransport {
         get async {
             AsyncStream { continuation in
                 let id = UUID()
-                continuation.yield(lastEvent)
+                continuation.yield(lastConnectionState)
                 continuations[id] = continuation
                 continuation.onTermination = { [weak self] _ in
                     Task { await self?.removeContinuation(id: id) }
@@ -96,7 +99,13 @@ extension MachPortFrameTransport: FrameTransport {
 
 private extension MachPortFrameTransport {
     func broadcast(_ event: FrameTransportEvent) {
-        lastEvent = event
+        switch event {
+        case .connected, .disconnected:
+            lastConnectionState = event
+        case .sendFailed:
+            // transient ― replay 状態は更新しない
+            break
+        }
         for continuation in continuations.values {
             continuation.yield(event)
         }

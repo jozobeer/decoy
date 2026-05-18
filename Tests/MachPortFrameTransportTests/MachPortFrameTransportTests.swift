@@ -1,4 +1,3 @@
-import ConcurrencyExtras
 import Domain
 import Foundation
 import Testing
@@ -175,6 +174,24 @@ struct MachPortFrameTransportTests {
             sender: RecordingSender()
         )
         try await transport.connect()
+
+        var iterator = await transport.events.makeAsyncIterator()
+        let replayed = await iterator.next()
+        #expect(replayed == .connected)
+    }
+
+    @Test
+    func eventsStream_replayIgnoresTransientSendFailed() async throws {
+        // `.sendFailed` は transient ― 「現在の接続状態」を表さないので
+        // 新規 subscriber には replay されない。connect 直後に send 失敗
+        // が起きても、後から subscribe した観測者は `.connected` を見る。
+        let transport = MachPortFrameTransport(
+            serviceName: "decoy.test",
+            lookup: SuccessLookup(token: MachPortToken(raw: 7)),
+            sender: FailingSender()
+        )
+        try await transport.connect()
+        _ = try? await transport.send(Self.frame())
 
         var iterator = await transport.events.makeAsyncIterator()
         let replayed = await iterator.next()
