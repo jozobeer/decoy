@@ -8,7 +8,7 @@ import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 
 @Suite("BroadcasterEvents", .timeLimit(.minutes(1)))
 struct BroadcasterEventsTests {
@@ -44,7 +44,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -67,7 +67,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -93,7 +93,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 3)
             await broadcaster.shutdown()
 
@@ -119,7 +119,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 3)
             await broadcaster.shutdown()
 
@@ -145,7 +145,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(mode))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(mode))
             let events = await collectEvents(from: broadcaster, atLeast: 2)
             await broadcaster.shutdown()
 
@@ -169,7 +169,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -192,7 +192,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -218,7 +218,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 2) {
                 // First .storeReadFailed flows during the init's routing
                 // task. Burn yields so it surfaces before we issue the
@@ -250,7 +250,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -278,7 +278,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -297,7 +297,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -308,7 +308,7 @@ struct BroadcasterEventsTests {
     @Test func shutdownBeforeInitialRouting_emitsNoEvents() async throws {
         // init defers `startRouting()` via a `Task { await self?... }`
         // hop so the emit closure can capture fully-initialized self.
-        // A caller that does `Broadcaster() → await shutdown()` rapidly
+        // A caller that does `BroadcasterUseCaseImpl() → await shutdown()` rapidly
         // can race the deferred hop — without a sticky `terminated`
         // flag, `stopRouting()` would see `routing == nil`, return, and
         // then the deferred task could still start routing afterward.
@@ -323,7 +323,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             await broadcaster.shutdown()
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             #expect(events.isEmpty)
@@ -344,7 +344,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             await broadcaster.shutdown()
             let events = await collectEvents(from: broadcaster, atLeast: 0) {
                 await broadcaster.handle(.startDecoy(.loop))
@@ -366,7 +366,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -386,7 +386,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -405,7 +405,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -426,7 +426,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let events = await collectEvents(from: broadcaster, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -445,7 +445,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let events = await collectEvents(from: broadcaster, atLeast: 0) {
                 await broadcaster.handle(foreign)
             }
@@ -467,7 +467,7 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             // Subscribe BEFORE routing emits events (state is .live but
             // we control timing via HoldingCameraSource? Actually for
             // InMemoryCameraSource the source finishes quickly so we
@@ -475,8 +475,8 @@ struct BroadcasterEventsTests {
             let firstSub = await broadcaster.subscribeEvents()
             let secondSub = await broadcaster.subscribeEvents()
 
-            async let firstEvents: [Broadcaster.Event] = take(firstSub, count: 1)
-            async let secondEvents: [Broadcaster.Event] = take(secondSub, count: 1)
+            async let firstEvents: [BroadcasterEvent] = take(firstSub, count: 1)
+            async let secondEvents: [BroadcasterEvent] = take(secondSub, count: 1)
 
             // Force the routing task forward by yielding.
             await Task.megaYield()
@@ -509,12 +509,12 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             // Let the first frame fail.
             await Task.megaYield()
 
             let lateSub = await broadcaster.subscribeEvents()
-            async let lateEvents: [Broadcaster.Event] = take(lateSub, count: 1)
+            async let lateEvents: [BroadcasterEvent] = take(lateSub, count: 1)
 
             // Append more frames — these will also fail and the late
             // subscriber must see at least one.
@@ -542,13 +542,13 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
 
             let persistentSub = await broadcaster.subscribeEvents()
             let cancelledSub = await broadcaster.subscribeEvents()
 
-            async let persistentEvents: [Broadcaster.Event] = take(persistentSub, count: 1)
-            let doomed = Task<[Broadcaster.Event], Never> { [cancelledSub] in
+            async let persistentEvents: [BroadcasterEvent] = take(persistentSub, count: 1)
+            let doomed = Task<[BroadcasterEvent], Never> { [cancelledSub] in
                 await take(cancelledSub, count: 1)
             }
             doomed.cancel()
@@ -585,9 +585,9 @@ struct BroadcasterEventsTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let subscription = await broadcaster.subscribeEvents()
-            async let events: [Broadcaster.Event] = take(subscription, count: 2)
+            async let events: [BroadcasterEvent] = take(subscription, count: 2)
 
             await Task.megaYield()  // live frame fails → .sendFailed (1)
             await broadcaster.handle(.startDecoy(.once))
@@ -619,10 +619,10 @@ extension BroadcasterEventsTests {
     /// internal scheduling — see `BroadcasterPlaybackTests.collectFrames`
     /// for rationale.
     private func collectEvents(
-        from broadcaster: Broadcaster,
+        from broadcaster: BroadcasterUseCaseImpl,
         atLeast count: Int,
         while action: (@Sendable () async -> Void)? = nil
-    ) async -> [Broadcaster.Event] {
+    ) async -> [BroadcasterEvent] {
         let subscription = await broadcaster.subscribeEvents()
         let buffer = EventBuffer()
         let collector = Task<Void, Never> { [subscription] in
@@ -642,8 +642,8 @@ extension BroadcasterEventsTests {
         return await buffer.snapshot
     }
 
-    private func take(_ subscription: Broadcaster.Subscription, count: Int) async -> [Broadcaster.Event] {
-        var collected: [Broadcaster.Event] = []
+    private func take(_ subscription: BroadcasterEvents, count: Int) async -> [BroadcasterEvent] {
+        var collected: [BroadcasterEvent] = []
         for await event in subscription {
             collected.append(event)
             if collected.count >= count { break }
@@ -662,14 +662,14 @@ private struct TestError: Error, Equatable, Sendable {
 /// polling loop can peek at the captured count without racing the
 /// collector's append path.
 private actor EventBuffer {
-    private var events: [Broadcaster.Event] = []
+    private var events: [BroadcasterEvent] = []
 
-    func append(_ event: Broadcaster.Event) {
+    func append(_ event: BroadcasterEvent) {
         events.append(event)
     }
 
     var count: Int { events.count }
-    var snapshot: [Broadcaster.Event] { events }
+    var snapshot: [BroadcasterEvent] { events }
 }
 
 /// VirtualCameraSink that always throws the given error on send.

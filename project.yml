@@ -63,7 +63,7 @@ targets:
       - package: DecoyPackage
         product: RecorderUseCase
       - package: DecoyPackage
-        product: Broadcaster
+        product: BroadcasterUseCase
       - package: DecoyPackage
         product: AppCommandDispatcher
       - package: DecoyPackage

@@ -1,41 +1,28 @@
 import Foundation
 import OSLog
 import Dependencies
-import DependencyInjection
 import Domain
 
-public actor Broadcaster {
-    public enum Event: Sendable {
-        case sendFailed(any Error & Sendable)
-        case storeReadFailed(any Error & Sendable)
-    }
-
-    private nonisolated let cameraSource: any CameraSource
-    private nonisolated let virtualCameraSink: any VirtualCameraSink
-    private nonisolated let clipStore: any ClipStore
-    private nonisolated let clock: any Clock<Duration>
+public actor BroadcasterUseCaseImpl {
+    @Dependency(\.cameraSource) private var cameraSource
+    @Dependency(\.virtualCameraSink) private var virtualCameraSink
+    @Dependency(\.clipStore) private var clipStore
+    @Dependency(\.continuousClock) private var clock
 
     public private(set) var state: OutputMode
     private var routing: Task<Void, Never>?
-    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    private var subscribers: [UUID: AsyncStream<BroadcasterEvent>.Continuation] = [:]
     /// Sticky flag: once `shutdown()` runs, any subsequent
     /// `startRouting()` is a no-op. Defends the deferred init-task hop
-    /// against a caller that does `Broadcaster() → await shutdown()`
-    /// before the actor has processed the init's `startRouting()` hop.
+    /// against a caller that does `BroadcasterUseCaseImpl() → await
+    /// shutdown()` before the actor has processed the init's
+    /// `startRouting()` hop.
     private var terminated = false
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "Broadcaster")
     private static let subscriberBufferLimit = 64
 
     public init(state: OutputMode = .live) {
-        @Dependency(\.cameraSource) var cameraSource
-        @Dependency(\.virtualCameraSink) var virtualCameraSink
-        @Dependency(\.clipStore) var clipStore
-        @Dependency(\.continuousClock) var clock
-        self.cameraSource = cameraSource
-        self.virtualCameraSink = virtualCameraSink
-        self.clipStore = clipStore
-        self.clock = clock
         self.state = state
         // Initial routing is started via a hop back into the actor so
         // we can build an `emit` closure that captures fully-initialized
@@ -46,7 +33,9 @@ public actor Broadcaster {
             await self?.startRouting()
         }
     }
+}
 
+extension BroadcasterUseCaseImpl: BroadcasterUseCase {
     public func handle(_ command: AppCommand) async {
         if terminated { return }
         switch command {
@@ -76,21 +65,22 @@ public actor Broadcaster {
     public func shutdown() async {
         terminated = true
         await stopRouting()
+        subscribers.values.forEach { $0.finish() }
+        subscribers.removeAll()
     }
 
-    /// Returns a `Subscription` token whose lifetime owns the
-    /// underlying subscriber slot. The token IS the `AsyncSequence` —
-    /// `for await event in subscription { ... }` — and its iterator
-    /// strongly retains the token. Cleanup paths mirror `Recorder`:
-    /// 1. `Subscription.deinit` — deterministic drop-driven cleanup
-    ///    when every iterator AND every external strong reference is
-    ///    released.
-    /// 2. `onTermination` — cancellation-driven cleanup for iteration
-    ///    Tasks that cancel.
-    /// 3. `broadcast` — lazy `.terminated` cleanup as a final backstop.
-    public func subscribeEvents() -> Subscription {
+    /// Returns a passive `BroadcasterEvents` value facade. Cleanup is
+    /// driven by:
+    /// 1. caller-invoked `events.cancel()` — recommended pattern is
+    ///    `defer { Task { await events.cancel() } }` around `for await`,
+    ///    so the slot is released even when the iterating Task is
+    ///    cancelled before entering the loop.
+    /// 2. `AsyncStream.onTermination` — fires when the iterator drops
+    ///    or the iterating Task cancels.
+    /// 3. `broadcast` `.terminated` cleanup — lazy backstop.
+    public func subscribeEvents() async -> BroadcasterEvents {
         let (stream, continuation) = AsyncStream.makeStream(
-            of: Event.self,
+            of: BroadcasterEvent.self,
             bufferingPolicy: .bufferingNewest(Self.subscriberBufferLimit)
         )
         let id = UUID()
@@ -98,50 +88,16 @@ public actor Broadcaster {
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeSubscriber(id: id) }
         }
-        return Subscription(stream: stream) { [weak self] in
-            Task { await self?.removeSubscriber(id: id) }
-        }
-    }
-}
-
-public extension Broadcaster {
-    /// Strong-ref token returned by `subscribeEvents()`. Iterate it
-    /// directly with `for await event in subscription` — the iterator
-    /// retains the token so the consumer cannot accidentally release
-    /// ownership while iterating. Mirrors `Recorder.Subscription`.
-    final class Subscription: AsyncSequence, Sendable {
-        public typealias Element = Event
-
-        private let stream: AsyncStream<Event>
-        private let cleanup: @Sendable () -> Void
-
-        init(stream: AsyncStream<Event>, cleanup: @escaping @Sendable () -> Void) {
-            self.stream = stream
-            self.cleanup = cleanup
-        }
-
-        deinit { cleanup() }
-
-        public func makeAsyncIterator() -> AsyncIterator {
-            AsyncIterator(subscription: self, inner: stream.makeAsyncIterator())
-        }
-
-        public struct AsyncIterator: AsyncIteratorProtocol {
-            /// Strong ref keeps the parent `Subscription` alive for the
-            /// duration of iteration — closes the gap where extracting
-            /// the stream from a temporary token would let ARC release
-            /// the token before any event was delivered.
-            let subscription: Subscription
-            var inner: AsyncStream<Event>.AsyncIterator
-
-            public mutating func next() async -> Event? {
-                await inner.next()
+        return BroadcasterEvents(
+            stream: stream,
+            cancel: { [weak self] in
+                await self?.removeSubscriber(id: id)
             }
-        }
+        )
     }
 }
 
-extension Broadcaster {
+extension BroadcasterUseCaseImpl {
     /// Floor for inter-frame sleep duration. Single-frame `.pingPong`
     /// clips, or clips with identical adjacent pts, would otherwise
     /// hot-spin the routing task. 1ms is below human perception and
@@ -150,7 +106,7 @@ extension Broadcaster {
 
     private func startRouting() {
         guard !terminated, routing == nil else { return }
-        let emit: @Sendable (Event) async -> Void = { [weak self] event in
+        let emit: @Sendable (BroadcasterEvent) async -> Void = { [weak self] event in
             await self?.broadcast(event)
         }
         let task = Self.makeRoutingTask(
@@ -194,7 +150,7 @@ extension Broadcaster {
 
     /// Fan out an event to all live subscribers. `.terminated`
     /// continuations are dropped from the map lazily on the next emit.
-    private func broadcast(_ event: Event) {
+    private func broadcast(_ event: BroadcasterEvent) {
         let snapshot = subscribers
         let terminated = snapshot.compactMap { id, continuation -> UUID? in
             switch continuation.yield(event) {
@@ -213,7 +169,7 @@ extension Broadcaster {
     /// stream. The `finish()` ensures any active iterator exits cleanly
     /// when cleanup runs from a path other than the iterator itself
     /// (e.g., `onTermination` from a cancelled Task). Mirrors
-    /// `Recorder.removeSubscriber(id:)`.
+    /// `RecorderUseCaseImpl.removeSubscriber(id:)`.
     private func removeSubscriber(id: UUID) {
         subscribers.removeValue(forKey: id)?.finish()
     }
@@ -228,7 +184,7 @@ extension Broadcaster {
         store: any ClipStore,
         sink: any VirtualCameraSink,
         clock: any Clock<Duration>,
-        emit: @escaping @Sendable (Event) async -> Void
+        emit: @escaping @Sendable (BroadcasterEvent) async -> Void
     ) -> Task<Void, Never> {
         switch state {
         case .live:
@@ -241,7 +197,7 @@ extension Broadcaster {
     private static func makeLiveRoutingTask(
         source: any CameraSource,
         sink: any VirtualCameraSink,
-        emit: @escaping @Sendable (Event) async -> Void
+        emit: @escaping @Sendable (BroadcasterEvent) async -> Void
     ) -> Task<Void, Never> {
         Task {
             let stream = await source.frames()
@@ -264,7 +220,7 @@ extension Broadcaster {
         store: any ClipStore,
         sink: any VirtualCameraSink,
         clock: any Clock<Duration>,
-        emit: @escaping @Sendable (Event) async -> Void
+        emit: @escaping @Sendable (BroadcasterEvent) async -> Void
     ) -> Task<Void, Never> {
         Task {
             let clip: Clip?
@@ -293,7 +249,7 @@ extension Broadcaster {
         mode: PlaybackMode,
         sink: any VirtualCameraSink,
         clock: any Clock<Duration>,
-        emit: @escaping @Sendable (Event) async -> Void
+        emit: @escaping @Sendable (BroadcasterEvent) async -> Void
     ) async {
         var index = 0
         var direction = 1
@@ -376,4 +332,3 @@ extension Broadcaster {
         return current + direction
     }
 }
-

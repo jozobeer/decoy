@@ -6,7 +6,7 @@ import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 
 @Suite("Broadcaster")
 struct BroadcasterTests {
@@ -14,7 +14,7 @@ struct BroadcasterTests {
 
     @Test func defaultInit_isLive() async {
         await withStubDeps {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             #expect(await broadcaster.state == .live)
         }
     }
@@ -27,7 +27,7 @@ struct BroadcasterTests {
     ])
     func explicitInit_preservesGivenState(initial: OutputMode) async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: initial)
+            let broadcaster = BroadcasterUseCaseImpl(state: initial)
             #expect(await broadcaster.state == initial)
         }
     }
@@ -37,7 +37,7 @@ struct BroadcasterTests {
     @Test(arguments: [PlaybackMode.once, .loop, .pingPong])
     func startDecoy_fromLive_setsPlaybackWithGivenMode(mode: PlaybackMode) async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.startDecoy(mode))
             #expect(await broadcaster.state == .playback(mode))
         }
@@ -46,7 +46,7 @@ struct BroadcasterTests {
     @Test(arguments: [PlaybackMode.once, .loop, .pingPong])
     func returnToLive_fromAnyPlayback_setsLive(mode: PlaybackMode) async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .playback(mode))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(mode))
             await broadcaster.handle(.returnToLive)
             #expect(await broadcaster.state == .live)
         }
@@ -58,7 +58,7 @@ struct BroadcasterTests {
                      [PlaybackMode.once, .loop, .pingPong])
     func startDecoy_fromPlayback_switchesToTargetMode(initial: PlaybackMode, target: PlaybackMode) async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .playback(initial))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(initial))
             await broadcaster.handle(.startDecoy(target))
             #expect(await broadcaster.state == .playback(target))
         }
@@ -75,7 +75,7 @@ struct BroadcasterTests {
     [AppCommand.startRecording, .stopRecording])
     func ignoresForeignCommand(initial: OutputMode, foreign: AppCommand) async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: initial)
+            let broadcaster = BroadcasterUseCaseImpl(state: initial)
             await broadcaster.handle(foreign)
             #expect(await broadcaster.state == initial)
         }
@@ -87,7 +87,7 @@ struct BroadcasterTests {
     func startDecoy_whenAlreadyPlaybackSameMode_isNoOp(mode: PlaybackMode) async {
         await withStubDeps {
             let initial = OutputMode.playback(mode)
-            let broadcaster = Broadcaster(state: initial)
+            let broadcaster = BroadcasterUseCaseImpl(state: initial)
             await broadcaster.handle(.startDecoy(mode))
             #expect(await broadcaster.state == initial)
         }
@@ -95,7 +95,7 @@ struct BroadcasterTests {
 
     @Test func returnToLive_whenAlreadyLive_isNoOp() async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.returnToLive)
             #expect(await broadcaster.state == .live)
         }
@@ -105,7 +105,7 @@ struct BroadcasterTests {
 
     @Test func startDecoy_chain_lastModeWins() async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.startDecoy(.once))
             await broadcaster.handle(.startDecoy(.loop))
             await broadcaster.handle(.startDecoy(.pingPong))
@@ -115,7 +115,7 @@ struct BroadcasterTests {
 
     @Test func startDecoy_then_returnToLive_endsAtLive() async {
         await withStubDeps {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.startDecoy(.loop))
             await broadcaster.handle(.returnToLive)
             #expect(await broadcaster.state == .live)
