@@ -132,18 +132,34 @@ private extension DecoyCameraExtensionStreamSource {
                 pushReceivedFrame(frame)
             }
         } catch {
-            // checkInFailed (host が立っていない / entitlement 拒否) ―
-            // fallback timer のままにしておく。本 task は終わる。
+            // checkInFailed (host が立っていない / entitlement 拒否) や
+            // CancellationError ― receiver / task の参照を落として
+            // 次回 startStream() で retry できる状態に戻す。
+            timerQueue.async { [weak self] in
+                self?.clearReceiverState()
+            }
             return
         }
-        // stream が自然終了 (receiver.stop() / recv error) したら fallback
-        // を復帰させる。再 connect の試みは v1 では入れない ― receiver の
-        // events stream を別 PR で追加してから扱う。
+        // for await が抜けた = stream 終端。explicit stop (stopReceiver から
+        // Task cancel された) と server-side 終端 (host crash / recv error) を
+        // 区別する ― 前者は stream-stop semantics 通り fallback も復帰させない、
+        // 後者は client が真っ黒にならないように fallback timer を復帰させる。
+        let cancelled = Task.isCancelled
         timerQueue.async { [weak self] in
             guard let self else { return }
+            clearReceiverState()
+            guard !cancelled else { return }
             guard timer == nil else { return }
             startFallbackTimer()
         }
+    }
+
+    /// `receiverTask` / `receiver` を nil 化する。`stopReceiver` 経由で先に
+    /// clear 済みの場合は no-op になる。consumeReceiver の終了経路 (catch
+    /// / 自然終了) の後始末用。
+    func clearReceiverState() {
+        receiverTask = nil
+        receiver = nil
     }
 
     func pushReceivedFrame(_ frame: Frame) {
@@ -155,8 +171,12 @@ private extension DecoyCameraExtensionStreamSource {
         }
         do {
             let sampleBuffer = try FrameSampleBufferAdapter.sampleBuffer(from: frame)
-            // `.hostTime` clocking なので Mach uptime 由来の nanoseconds を渡す。
-            let hostTimeNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            // `.hostTime` clocking ― CMSampleBuffer の PTS と `hostTimeInNanoseconds`
+            // は同じ Mach uptime timeline で揃える。CMSampleBuffer の PTS は
+            // `frame.presentationTime` から組み立てているので、send 引数も
+            // それを nanoseconds に翻訳した値で渡す ― "now" を渡すと IPC
+            // latency 分のズレで client が drop / 早送り判定する。
+            let hostTimeNs = UInt64(max(0, (frame.presentationTime * Double(NSEC_PER_SEC)).rounded()))
             stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: hostTimeNs)
         } catch {
             // 1 frame drop ― receive loop は継続。30fps なので 1 frame の

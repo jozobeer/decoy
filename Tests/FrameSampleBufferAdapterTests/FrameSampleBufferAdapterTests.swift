@@ -70,7 +70,7 @@ struct FrameSampleBufferAdapterTests {
         }
     }
 
-    @Test("sampleBuffer rejects allocations the kernel refuses (negative dim)")
+    @Test("sampleBuffer rejects negative dimensions with a typed error")
     func sampleBuffer_rejectsNegativeDim() {
         let frame = Frame(
             presentationTime: 0.0,
@@ -80,7 +80,42 @@ struct FrameSampleBufferAdapterTests {
             pixelFormat: kCVPixelFormatType_32BGRA,
             bytesPerRow: 4
         )
-        #expect(throws: (any Error).self) {
+        #expect(throws: FrameSampleBufferAdapterError.negativeDimension(width: -1, height: 4, bytesPerRow: 4)) {
+            try FrameSampleBufferAdapter.sampleBuffer(from: frame)
+        }
+    }
+
+    @Test("sampleBuffer rejects pixelData shorter than bytesPerRow * height")
+    func sampleBuffer_rejectsShortPixelData() {
+        let width = 4
+        let height = 4
+        let bytesPerRow = width * 4
+        // need = 64, have = 16
+        let frame = Frame(
+            presentationTime: 0.0,
+            pixelData: Data(repeating: 0, count: 16),
+            width: width,
+            height: height,
+            pixelFormat: kCVPixelFormatType_32BGRA,
+            bytesPerRow: bytesPerRow
+        )
+        #expect(throws: FrameSampleBufferAdapterError.pixelDataTooShort(have: 16, need: 64)) {
+            try FrameSampleBufferAdapter.sampleBuffer(from: frame)
+        }
+    }
+
+    @Test("sampleBuffer rejects bytesPerRow * height overflow")
+    func sampleBuffer_rejectsOverflow() {
+        // bytesPerRow = Int.max, height = 2 → overflow
+        let frame = Frame(
+            presentationTime: 0.0,
+            pixelData: Data(),
+            width: 1,
+            height: 2,
+            pixelFormat: kCVPixelFormatType_32BGRA,
+            bytesPerRow: Int.max
+        )
+        #expect(throws: FrameSampleBufferAdapterError.requiredSizeOverflow(bytesPerRow: Int.max, height: 2)) {
             try FrameSampleBufferAdapter.sampleBuffer(from: frame)
         }
     }

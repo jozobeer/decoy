@@ -28,6 +28,7 @@ extension FrameSampleBufferAdapter {
     /// `FrameSampleBufferAdapterError` で伝播する ― 強制 unwrap や silent
     /// drop は行わない (Stream source 側で 1 frame drop の判断を委ねる)。
     public static func sampleBuffer(from frame: Frame) throws -> CMSampleBuffer {
+        try validate(frame: frame)
         let pixelBuffer = try makePixelBuffer(frame: frame)
         try copyPixels(from: frame, into: pixelBuffer)
         let formatDescription = try makeFormatDescription(pixelBuffer: pixelBuffer)
@@ -41,6 +42,34 @@ extension FrameSampleBufferAdapter {
 }
 
 private extension FrameSampleBufferAdapter {
+    /// `copyPixels` の memcpy より前に dim / payload の整合性を確認する。
+    /// `CVPixelBufferCreate` は負の dim を弾くものの、`bytesPerRow * height`
+    /// の overflow や `pixelData` の short payload は CV では検出されないため
+    /// out-of-bounds read で crash する。caller の validation に頼らず
+    /// adapter 側で水際で止める ― IPC で渡ってきた値の信頼度は低い。
+    static func validate(frame: Frame) throws {
+        guard frame.width >= 0, frame.height >= 0, frame.bytesPerRow >= 0 else {
+            throw FrameSampleBufferAdapterError.negativeDimension(
+                width: frame.width,
+                height: frame.height,
+                bytesPerRow: frame.bytesPerRow
+            )
+        }
+        let (required, overflowed) = frame.bytesPerRow.multipliedReportingOverflow(by: frame.height)
+        guard !overflowed else {
+            throw FrameSampleBufferAdapterError.requiredSizeOverflow(
+                bytesPerRow: frame.bytesPerRow,
+                height: frame.height
+            )
+        }
+        guard frame.pixelData.count >= required else {
+            throw FrameSampleBufferAdapterError.pixelDataTooShort(
+                have: frame.pixelData.count,
+                need: required
+            )
+        }
+    }
+
     static func makePixelBuffer(frame: Frame) throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
         let status = CVPixelBufferCreate(
@@ -48,8 +77,12 @@ private extension FrameSampleBufferAdapter {
             frame.width,
             frame.height,
             frame.pixelFormat,
-            // CMIO extension が拾える IOSurface-backed buffer にする。
-            // 空 dict だと CPU-only buffer になり client (Zoom 等) が拒否する。
+            // CMIO extension が拾える IOSurface-backed buffer にするには
+            // `kCVPixelBufferIOSurfacePropertiesKey` を attribute dict に
+            // 含める必要がある (中身は空 `[:]` でも有効 ― 同じパターンは
+            // `LogoFrameRenderer` / `SampleBufferTranslatorTests` で先行採用済)。
+            // key 自体を omit すると IOSurface 非サポートの CPU-only buffer
+            // になり、client (Zoom 等) が rejects する。
             [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary,
             &buffer
         )
@@ -98,8 +131,8 @@ private extension FrameSampleBufferAdapter {
 
     static func makeTiming(presentationTime: TimeInterval) -> CMSampleTimingInfo {
         // `.hostTime` clock + `CMTime(seconds:preferredTimescale:)` で
-        // nanoseconds 基準に翻訳。`Int32.max - 1` を timescale に指定すれば
-        // 30 fps × 数時間 でも丸め誤差は 1 ns 未満。
+        // nanoseconds 基準に翻訳。timescale = `NSEC_PER_SEC` (= 1e9) なら
+        // 30 fps × 数時間でも丸め誤差は 1 ns 未満で済む。
         let pts = CMTime(seconds: presentationTime, preferredTimescale: Int32(NSEC_PER_SEC))
         return CMSampleTimingInfo(
             duration: .invalid,
@@ -133,6 +166,9 @@ private extension FrameSampleBufferAdapter {
 }
 
 public enum FrameSampleBufferAdapterError: Error, Equatable, Sendable {
+    case negativeDimension(width: Int, height: Int, bytesPerRow: Int)
+    case requiredSizeOverflow(bytesPerRow: Int, height: Int)
+    case pixelDataTooShort(have: Int, need: Int)
     case pixelBufferAllocFailed(code: Int)
     case pixelBufferLockFailed(code: Int)
     case pixelBufferBaseAddressMissing
