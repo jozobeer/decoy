@@ -8,7 +8,7 @@ import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
 @testable import AppCommandDispatcher
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 @testable import MenuBarUI
 @testable import RecorderUseCase
 
@@ -27,53 +27,62 @@ struct MenuBarViewModelTests {
     // MARK: - Initial state
 
     @Test func init_initialState_matchesDefaults() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: SpyDispatcher()
-            )
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let viewModel = MenuBarViewModel(dispatcher: SpyDispatcher())
 
-            #expect(viewModel.recordingState == .idle)
-            #expect(viewModel.outputMode == .live)
-            #expect(viewModel.pendingPlaybackMode == .loop)
-            #expect(viewModel.lastErrorMessage == nil)
-            #expect(viewModel.isRecording == false)
-            #expect(viewModel.isInDecoy == false)
-            #expect(viewModel.activePlaybackMode == nil)
+                #expect(viewModel.recordingState == .idle)
+                #expect(viewModel.outputMode == .live)
+                #expect(viewModel.pendingPlaybackMode == .loop)
+                #expect(viewModel.lastErrorMessage == nil)
+                #expect(viewModel.isRecording == false)
+                #expect(viewModel.isInDecoy == false)
+                #expect(viewModel.activePlaybackMode == nil)
+            }
         }
     }
 
     @Test func start_primesStateFromActors() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .playback(.pingPong))
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: SpyDispatcher()
-            )
-            await viewModel.start()
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.pingPong))
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let viewModel = MenuBarViewModel(dispatcher: SpyDispatcher())
+                await viewModel.start()
 
-            #expect(viewModel.outputMode == .playback(.pingPong))
-            #expect(viewModel.activePlaybackMode == .pingPong)
-            #expect(viewModel.isInDecoy)
+                #expect(viewModel.outputMode == .playback(.pingPong))
+                #expect(viewModel.activePlaybackMode == .pingPong)
+                #expect(viewModel.isInDecoy)
+            }
         }
     }
 
     // MARK: - Dispatch verbs
 
     @Test func startRecording_dispatchesAndRefreshesState() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let spy = SpyDispatcher()
-            let viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: spy)
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let spy = SpyDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: spy)
 
-            await viewModel.startRecording()
+                await viewModel.startRecording()
 
-            await #expect(spy.commands == [.startRecording])
-            #expect(viewModel.recordingState == .idle)
+                await #expect(spy.commands == [.startRecording])
+                #expect(viewModel.recordingState == .idle)
+            }
         }
     }
 
@@ -82,9 +91,7 @@ struct MenuBarViewModelTests {
         // view-model's `recordingState` ends at `.idle` after the
         // recorder's finish path runs. Tests both the dispatch wiring
         // and the post-dispatch state refresh.
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = InMemoryCameraSource(emitting: [Self.frame(0.0)])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -92,84 +99,107 @@ struct MenuBarViewModelTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster()
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: dispatcher
-            )
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: dispatcher)
 
-            await viewModel.startRecording()
-            await viewModel.stopRecording()
+                await viewModel.startRecording()
+                await viewModel.stopRecording()
 
-            #expect(viewModel.recordingState == .idle)
+                #expect(viewModel.recordingState == .idle)
+            }
         }
     }
 
     @Test func startDecoy_dispatchesPendingMode() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let spy = SpyDispatcher()
-            let viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: spy)
-            viewModel.pendingPlaybackMode = .pingPong
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let spy = SpyDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: spy)
+                viewModel.pendingPlaybackMode = .pingPong
 
-            await viewModel.startDecoy()
+                await viewModel.startDecoy()
 
-            await #expect(spy.commands == [.startDecoy(.pingPong)])
+                await #expect(spy.commands == [.startDecoy(.pingPong)])
+            }
         }
     }
 
     @Test func returnToLive_dispatches_andRefreshesState() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .playback(.loop))
-            let spy = SpyDispatcher()
-            let viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: spy)
-            await viewModel.start()
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let spy = SpyDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: spy)
+                await viewModel.start()
 
-            await viewModel.returnToLive()
+                await viewModel.returnToLive()
 
-            await #expect(spy.commands == [.returnToLive])
-            // SpyDispatcher does not mutate the real broadcaster, so
-            // `outputMode` remains what `start()` snapshotted. The
-            // assertion that matters: `refreshState` ran (it re-read
-            // the broadcaster), which is observable via the equality
-            // below holding without us having explicitly set it post-
-            // dispatch.
-            #expect(viewModel.outputMode == .playback(.loop))
+                await #expect(spy.commands == [.returnToLive])
+                // SpyDispatcher does not mutate the real broadcaster, so
+                // `outputMode` remains what `start()` snapshotted. The
+                // assertion that matters: `refreshState` ran (it re-read
+                // the broadcaster), which is observable via the equality
+                // below holding without us having explicitly set it post-
+                // dispatch.
+                #expect(viewModel.outputMode == .playback(.loop))
+            }
         }
     }
 
     // MARK: - Picker behaviour
 
     @Test func selectPlaybackMode_whileLive_updatesPendingOnly_doesNotDispatch() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let spy = SpyDispatcher()
-            let viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: spy)
-            await viewModel.start()
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let spy = SpyDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: spy)
+                await viewModel.start()
 
-            await viewModel.selectPlaybackMode(.once)
+                await viewModel.selectPlaybackMode(.once)
 
-            #expect(viewModel.pendingPlaybackMode == .once)
-            await #expect(spy.commands.isEmpty)
+                #expect(viewModel.pendingPlaybackMode == .once)
+                await #expect(spy.commands.isEmpty)
+            }
         }
     }
 
     @Test func selectPlaybackMode_whileInDecoy_dispatchesStartDecoy() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .playback(.loop))
-            let spy = SpyDispatcher()
-            let viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: spy)
-            await viewModel.start()
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let spy = SpyDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: spy)
+                await viewModel.start()
 
-            await viewModel.selectPlaybackMode(.pingPong)
+                await viewModel.selectPlaybackMode(.pingPong)
 
-            #expect(viewModel.pendingPlaybackMode == .pingPong)
-            await #expect(spy.commands == [.startDecoy(.pingPong)])
+                #expect(viewModel.pendingPlaybackMode == .pingPong)
+                await #expect(spy.commands == [.startDecoy(.pingPong)])
+            }
         }
     }
 
@@ -180,75 +210,76 @@ struct MenuBarViewModelTests {
         // consumption Task alive, so `recordingState` stays `.recording`
         // until `stopRecording` cancels it. A finite emit list would
         // race the assertion against the consumption Task's completion.
-        let source = NeverEndingCameraSource()
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
-            $0.cameraSource = source
+            $0.cameraSource = NeverEndingCameraSource()
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
             $0.continuousClock = ImmediateClock()
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster()
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: dispatcher
-            )
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: dispatcher)
 
-            await viewModel.startRecording()
-            #expect(viewModel.isRecording)
+                await viewModel.startRecording()
+                #expect(viewModel.isRecording)
 
-            await viewModel.stopRecording()
-            #expect(viewModel.isRecording == false)
+                await viewModel.stopRecording()
+                #expect(viewModel.isRecording == false)
+            }
         }
     }
 
     @Test func activePlaybackMode_flattensOutputMode() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .playback(.once))
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: SpyDispatcher()
-            )
-            await viewModel.start()
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let viewModel = MenuBarViewModel(dispatcher: SpyDispatcher())
+                await viewModel.start()
 
-            #expect(viewModel.activePlaybackMode == .once)
-            #expect(viewModel.isInDecoy)
+                #expect(viewModel.activePlaybackMode == .once)
+                #expect(viewModel.isInDecoy)
+            }
         }
     }
 
     // MARK: - Event-driven error surfacing
 
     @Test func saveFailedEvent_surfacedAsErrorMessage() async throws {
-        let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
-        let store = FailingClipStore()
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
-            $0.cameraSource = source
-            $0.clipStore = store
+            $0.cameraSource = InMemoryCameraSource(emitting: [Self.frame(0.0)])
+            $0.clipStore = FailingClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
             $0.continuousClock = ImmediateClock()
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster()
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-            let viewModel = MenuBarViewModel(
-                broadcaster: broadcaster,
-                dispatcher: dispatcher
-            )
-            await viewModel.start()
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
+                let viewModel = MenuBarViewModel(dispatcher: dispatcher)
+                await viewModel.start()
 
-            await viewModel.startRecording()
-            await viewModel.stopRecording()
-            await waitForCondition { viewModel.lastErrorMessage != nil }
+                await viewModel.startRecording()
+                await viewModel.stopRecording()
+                await waitForCondition { viewModel.lastErrorMessage != nil }
 
-            #expect(viewModel.lastErrorMessage?.contains("録画の保存に失敗") == true)
+                #expect(viewModel.lastErrorMessage?.contains("録画の保存に失敗") == true)
+            }
         }
     }
 }
@@ -256,12 +287,17 @@ struct MenuBarViewModelTests {
 // MARK: - Test helpers
 
 extension MenuBarViewModelTests {
-    fileprivate func withStubDeps<R: Sendable>(
-        recorder: any RecorderUseCase,
+    /// Stub base dependencies needed for any test that constructs a
+    /// `BroadcasterUseCaseImpl` — its init spawns a Task that captures
+    /// the surrounding dep context at construction time. Tests must
+    /// build the impl *inside* this block and then layer
+    /// `$0.recorder` / `$0.broadcaster` in a nested `withDependencies`
+    /// around the test body. See AppCommandDispatcherTests for the
+    /// same pattern.
+    fileprivate func withStubBaseDeps<R: Sendable>(
         _ operation: @MainActor @Sendable () async throws -> R
     ) async rethrows -> R {
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()

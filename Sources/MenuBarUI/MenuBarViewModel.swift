@@ -1,4 +1,3 @@
-import Broadcaster
 import Dependencies
 import Domain
 import Foundation
@@ -9,18 +8,17 @@ import SwiftUI
 /// the View calls into.
 ///
 /// State refresh strategy: `RecordingState` and `OutputMode` are not
-/// carried by `RecorderEvent` / `Broadcaster.Event` (those streams
+/// carried by `RecorderEvent` / `BroadcasterEvent` (those streams
 /// surface I/O failures, not transitions). After every dispatch and on
 /// every event arrival, the view-model reads the actors' authoritative
 /// `state` properties back. This keeps the UI in lockstep with the
 /// underlying actors without inventing a parallel state machine.
 ///
-/// Lifetimes: the recorder event task iterates a passive
-/// `RecorderEvents` value facade and uses `defer { Task { await
-/// events.cancel() } }` so the actor-side subscriber slot is released
-/// whether the task ends naturally, is cancelled before iteration
-/// begins, or is cancelled mid-iteration. The broadcaster path keeps
-/// the same shape via its own `Subscription` token. On `deinit` we
+/// Lifetimes: both event tasks iterate passive value facades
+/// (`RecorderEvents` / `BroadcasterEvents`) and use `defer { Task {
+/// await events.cancel() } }` so the actor-side subscriber slot is
+/// released whether the task ends naturally, is cancelled before
+/// iteration begins, or is cancelled mid-iteration. On `deinit` we
 /// cancel both Tasks; cancellation fires the `defer` cleanup which
 /// hops back into the actor to release the slot.
 @MainActor
@@ -38,17 +36,13 @@ public final class MenuBarViewModel: ObservableObject {
     @Published public var lastErrorMessage: String?
 
     @Dependency(\.recorder) private var recorder
-    private let broadcaster: Broadcaster
+    @Dependency(\.broadcaster) private var broadcaster
     private let dispatcher: any AppCommandDispatching
 
     private var recorderEventTask: Task<Void, Never>?
     private var broadcasterEventTask: Task<Void, Never>?
 
-    public init(
-        broadcaster: Broadcaster,
-        dispatcher: any AppCommandDispatching
-    ) {
-        self.broadcaster = broadcaster
+    public init(dispatcher: any AppCommandDispatching) {
         self.dispatcher = dispatcher
     }
 
@@ -135,10 +129,13 @@ extension MenuBarViewModel {
     }
 
     private func makeBroadcasterEventTask() -> Task<Void, Never> {
-        let subscription = Task { [broadcaster] in await broadcaster.subscribeEvents() }
+        let broadcaster = self.broadcaster
         return Task { [weak self] in
-            let token = await subscription.value
-            for await event in token {
+            let events = await broadcaster.subscribeEvents()
+            // Symmetric cleanup with the recorder task — see comment
+            // there for the cancel→recreate leak rationale.
+            defer { Task { await events.cancel() } }
+            for await event in events {
                 await self?.handleBroadcasterEvent(event)
             }
         }
@@ -154,7 +151,7 @@ extension MenuBarViewModel {
         }
     }
 
-    private func handleBroadcasterEvent(_ event: Broadcaster.Event) async {
+    private func handleBroadcasterEvent(_ event: BroadcasterEvent) async {
         switch event {
         case .sendFailed(let error):
             lastErrorMessage = "出力に失敗しました: \(error.localizedDescription)"

@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "Entity", targets: ["Entity"]),
         .library(name: "Domain", targets: ["Domain"]),
         .library(name: "RecorderUseCase", targets: ["RecorderUseCase"]),
-        .library(name: "Broadcaster", targets: ["Broadcaster"]),
+        .library(name: "BroadcasterUseCase", targets: ["BroadcasterUseCase"]),
         .library(name: "InMemoryClipStore", targets: ["InMemoryClipStore"]),
         .library(name: "InMemoryVirtualCameraSink", targets: ["InMemoryVirtualCameraSink"]),
         .library(name: "InMemoryCameraSource", targets: ["InMemoryCameraSource"]),
@@ -40,7 +40,7 @@ let package = Package(
             dependencies: [
                 "Domain",
                 "RecorderUseCase",
-                "Broadcaster",
+                "BroadcasterUseCase",
                 "AppCommandDispatcher",
                 "DependencyInjection",
                 "HotkeyService",
@@ -71,7 +71,6 @@ let package = Package(
             name: "MenuBarUI",
             dependencies: [
                 "Domain",
-                "Broadcaster",
                 "AppCommandDispatcher",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
@@ -92,10 +91,9 @@ let package = Package(
             ]
         ),
         .target(
-            name: "Broadcaster",
+            name: "BroadcasterUseCase",
             dependencies: [
                 "Domain",
-                "DependencyInjection",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
@@ -131,6 +129,7 @@ let package = Package(
                 "CMIOVirtualCameraSink",
                 "HotkeyService",
                 "RecorderUseCase",
+                "BroadcasterUseCase",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
@@ -138,7 +137,6 @@ let package = Package(
             name: "AppCommandDispatcher",
             dependencies: [
                 "Domain",
-                "Broadcaster",
                 .product(name: "Dependencies", package: "swift-dependencies"),
             ]
         ),
@@ -155,9 +153,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "BroadcasterTests",
+            name: "BroadcasterUseCaseTests",
             dependencies: [
-                "Broadcaster",
+                "BroadcasterUseCase",
                 "Domain",
                 "DependencyInjection",
                 "InMemoryCameraSource",
@@ -172,7 +170,7 @@ let package = Package(
             name: "AppCommandDispatcherTests",
             dependencies: [
                 "AppCommandDispatcher",
-                "Broadcaster",
+                "BroadcasterUseCase",
                 "RecorderUseCase",
                 "Domain",
                 "DependencyInjection",
@@ -199,7 +197,7 @@ let package = Package(
                 "MenuBarUI",
                 "Domain",
                 "RecorderUseCase",
-                "Broadcaster",
+                "BroadcasterUseCase",
                 "AppCommandDispatcher",
                 "DependencyInjection",
                 "InMemoryCameraSource",

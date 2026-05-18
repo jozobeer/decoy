@@ -28,7 +28,7 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
 - Entity は純粋データ（`Sources/Entity/`、computed property のロジック禁止）
 - Domain は port (protocol) only（`Sources/Domain/` ― 契約面のみ、`@_exported import Entity` で Entity 透過）
 - coverage-ignored: `Entity` / `Domain` / `DependencyInjection`
-- `RecorderUseCase` は protocol 抽象＋actor impl の分離（`Sources/Domain/UseCase/RecorderUseCase.swift` の port + `Sources/RecorderUseCase/RecorderUseCaseImpl.swift` の actor ― lyra と同じ pattern）。`Broadcaster` は現状 concrete actor 直参照（Phase 3b で同 pattern に揃える）
+- `RecorderUseCase` / `BroadcasterUseCase` は protocol 抽象＋actor impl の分離（`Sources/Domain/UseCase/<Name>.swift` の port + `Sources/<Name>UseCase/<Name>UseCaseImpl.swift` の actor ― lyra と同じ pattern）。UI / dispatcher 経路は全て `@Dependency(\.recorder)` / `@Dependency(\.broadcaster)` 経由
 - `AppCommand` enum で UI 入力経路を統一（adapter は AppCommand を発行するだけ）
 - AVCaptureSession / CMIO Camera Extension は port 化（`CameraSource`, `VirtualCameraSink` protocol）
 - メニューバー UI は SwiftUI `MenuBarExtra` ＋ 最小構成
@@ -38,7 +38,7 @@ Repo-Forge とは独立しており、Repo-Forge が消えても動く（**Stand
   - `Transport/` ― IPC port（`FrameTransport`）
   - `Repository/` ― 永続化 port（`ClipStore`）
   - `Installer/` ― System Extension 操作 port（`CameraExtensionInstaller`）
-  - `UseCase/` ― ビジネスロジック port（`RecorderUseCase`、Phase 3b で `BroadcasterUseCase` 追加予定）
+  - `UseCase/` ― ビジネスロジック port（`RecorderUseCase` / `BroadcasterUseCase`）
 
 ### 捨てたパターン
 

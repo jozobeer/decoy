@@ -7,7 +7,7 @@ import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 
 @Suite("BroadcasterIntegration", .timeLimit(.minutes(1)))
 struct BroadcasterIntegrationTests {
@@ -30,7 +30,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let frames = await collectFrames(from: sink, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -49,7 +49,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .live)
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
             let frames = await collectFrames(from: sink, atLeast: 1)
             await broadcaster.shutdown()
 
@@ -68,7 +68,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(mode))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(mode))
             let frames = await collectFrames(from: sink, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -92,7 +92,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let frames = await collectFrames(from: sink, atLeast: 3)
             await broadcaster.shutdown()
 
@@ -112,7 +112,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let frames = await collectFrames(from: sink, atLeast: 2)
             await broadcaster.shutdown()
 
@@ -132,7 +132,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let initial = await collectFrames(from: sink, atLeast: 1)
             #expect(initial.count == 1)
 
@@ -159,7 +159,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             // No frames yet — routing not active. The empty-frames
             // check alone is weak (atLeast: 0 short-circuits the poll),
             // so pin the precondition via subscribeCount too.
@@ -187,7 +187,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             let initial = await collectFrames(from: sink, atLeast: 1)
             #expect(initial.count == 1)
 
@@ -213,7 +213,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             _ = await collectFrames(from: sink, atLeast: 1)
 
             await broadcaster.handle(.returnToLive)
@@ -241,7 +241,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             await broadcaster.handle(.startDecoy(.loop))
             await broadcaster.handle(.startDecoy(.pingPong))
 
@@ -263,7 +263,7 @@ struct BroadcasterIntegrationTests {
             $0.clipStore = InMemoryClipStore()
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             _ = await collectFrames(from: sink, atLeast: 1)
             #expect(await source.subscribeCount == 1)
 

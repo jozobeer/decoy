@@ -8,7 +8,7 @@ import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
 @testable import AppCommandDispatcher
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 @testable import RecorderUseCase
 
 @Suite("AppCommandDispatcher")
@@ -24,17 +24,23 @@ struct AppCommandDispatcherTests {
 
     // MARK: - Construction
 
-    @Test func init_storesBothActors() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-            // Touching the dispatcher should not throw or trap. The
-            // smoke test is that we can dispatch an unrelated command
-            // and both actors remain in their default state.
-            await dispatcher.dispatch(.returnToLive)
-            #expect(await recorder.state == .idle)
-            #expect(await broadcaster.state == .live)
+    @Test func dispatch_routesToBothActorsViaDI() async {
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
+                // Smoke test: dispatch resolves both actors through DI
+                // and returns without trap. Both actors remain in their
+                // default state since `.returnToLive` is a no-op for an
+                // already-live broadcaster and is ignored by the recorder.
+                await dispatcher.dispatch(.returnToLive)
+                #expect(await recorder.state == .idle)
+                #expect(await broadcaster.state == .live)
+            }
         }
     }
 
@@ -46,9 +52,7 @@ struct AppCommandDispatcherTests {
         // but the full begin→finish lifecycle was driven by the
         // dispatch. Broadcaster is pinned to .playback(.once) so we can
         // assert it stays untouched by recording commands.
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -56,17 +60,23 @@ struct AppCommandDispatcherTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
 
-            await dispatcher.dispatch(.startRecording)
-            // Drive the consumption Task to completion so we observe
-            // the post-finish state deterministically.
-            await dispatcher.dispatch(.stopRecording)
+                await dispatcher.dispatch(.startRecording)
+                // Drive the consumption Task to completion so we observe
+                // the post-finish state deterministically.
+                await dispatcher.dispatch(.stopRecording)
 
-            #expect(await recorder.state == .idle)
-            // Broadcaster's mode is unchanged by recording commands.
-            #expect(await broadcaster.state == .playback(.once))
+                #expect(await recorder.state == .idle)
+                // Broadcaster's mode is unchanged by recording commands.
+                #expect(await broadcaster.state == .playback(.once))
+            }
         }
     }
 
@@ -76,9 +86,7 @@ struct AppCommandDispatcherTests {
         // landed on the Recorder side, not just the broadcaster.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = source
             $0.clipStore = store
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -86,47 +94,63 @@ struct AppCommandDispatcherTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
 
-            await dispatcher.dispatch(.startRecording)
-            await dispatcher.dispatch(.stopRecording)
+                await dispatcher.dispatch(.startRecording)
+                await dispatcher.dispatch(.stopRecording)
 
-            #expect(await recorder.state == .idle)
-            let saved = try await store.all()
-            #expect(saved.count == 1)
-            #expect(await broadcaster.state == .playback(.once))
+                #expect(await recorder.state == .idle)
+                let saved = try await store.all()
+                #expect(saved.count == 1)
+                #expect(await broadcaster.state == .playback(.once))
+            }
         }
     }
 
     @Test(arguments: [PlaybackMode.once, .loop, .pingPong])
     func dispatch_startDecoy_reachesBroadcasterAndIsNoOpOnRecorder(mode: PlaybackMode) async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .live)
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
 
-            await dispatcher.dispatch(.startDecoy(mode))
+                await dispatcher.dispatch(.startDecoy(mode))
 
-            #expect(await broadcaster.state == .playback(mode))
-            // Recorder ignores decoy commands — stays idle. Camera
-            // subscribe count is not a clean signal here because the
-            // Broadcaster also subscribes on .live init; recorder.state
-            // is the authoritative check.
-            #expect(await recorder.state == .idle)
+                #expect(await broadcaster.state == .playback(mode))
+                // Recorder ignores decoy commands — stays idle. Camera
+                // subscribe count is not a clean signal here because the
+                // Broadcaster also subscribes on .live init; recorder.state
+                // is the authoritative check.
+                #expect(await recorder.state == .idle)
+            }
         }
     }
 
     @Test func dispatch_returnToLive_reachesBroadcasterAndIsNoOpOnRecorder() async {
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster(state: .playback(.loop))
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
 
-            await dispatcher.dispatch(.returnToLive)
+                await dispatcher.dispatch(.returnToLive)
 
-            #expect(await broadcaster.state == .live)
-            #expect(await recorder.state == .idle)
+                #expect(await broadcaster.state == .live)
+                #expect(await recorder.state == .idle)
+            }
         }
     }
 
@@ -141,9 +165,7 @@ struct AppCommandDispatcherTests {
     @Test func dispatch_acrossCommands_drivesBothRecorderAndBroadcasterSideEffects() async throws {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
-        let recorder = RecorderUseCaseImpl()
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = source
             $0.clipStore = store
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -151,19 +173,25 @@ struct AppCommandDispatcherTests {
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
         } operation: {
-            let broadcaster = Broadcaster(state: .live)
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl(state: .live)
+            try await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
 
-            // .startRecording reaches the Recorder. Then .startDecoy
-            // reaches the Broadcaster. Both side effects must be
-            // observable after dispatch returns.
-            await dispatcher.dispatch(.startRecording)
-            await dispatcher.dispatch(.stopRecording)
-            await dispatcher.dispatch(.startDecoy(.once))
+                // .startRecording reaches the Recorder. Then .startDecoy
+                // reaches the Broadcaster. Both side effects must be
+                // observable after dispatch returns.
+                await dispatcher.dispatch(.startRecording)
+                await dispatcher.dispatch(.stopRecording)
+                await dispatcher.dispatch(.startDecoy(.once))
 
-            let saved = try await store.all()
-            #expect(saved.count == 1)
-            #expect(await broadcaster.state == .playback(.once))
+                let saved = try await store.all()
+                #expect(saved.count == 1)
+                #expect(await broadcaster.state == .playback(.once))
+            }
         }
     }
 
@@ -171,13 +199,18 @@ struct AppCommandDispatcherTests {
         // Sanity check: the dispatcher is a value type and can be
         // shared across isolation boundaries. If the type stops
         // conforming to Sendable, this captures it.
-        let recorder = RecorderUseCaseImpl()
-        await withStubDeps(recorder: recorder) {
-            let broadcaster = Broadcaster()
-            let dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-            let copy = dispatcher
-            await copy.dispatch(.returnToLive)
-            #expect(await broadcaster.state == .live)
+        await withStubBaseDeps {
+            let recorder = RecorderUseCaseImpl()
+            let broadcaster = BroadcasterUseCaseImpl()
+            await withDependencies {
+                $0.recorder = recorder
+                $0.broadcaster = broadcaster
+            } operation: {
+                let dispatcher = AppCommandDispatcher()
+                let copy = dispatcher
+                await copy.dispatch(.returnToLive)
+                #expect(await broadcaster.state == .live)
+            }
         }
     }
 }
@@ -185,17 +218,19 @@ struct AppCommandDispatcherTests {
 // MARK: - Test Helpers
 
 extension AppCommandDispatcherTests {
-    /// State-only smoke tests need every port wired because Broadcaster
-    /// captures all of them in `init` and Recorder reads them on
-    /// `handle`. Empty source / store finish immediately so no frames
-    /// flow through the sink; `ImmediateClock` keeps any pacing in
-    /// playback routing from blocking the test.
-    fileprivate func withStubDeps<R: Sendable>(
-        recorder: any RecorderUseCase,
+    /// State-only smoke tests need every port wired because the
+    /// Broadcaster impl reads them through routing tasks spawned during
+    /// init and the Recorder impl reads them through `@Dependency`
+    /// during `handle`. Empty source / store finish immediately so no
+    /// frames flow through the sink; `ImmediateClock` keeps any pacing
+    /// in playback routing from blocking the test. The actors and the
+    /// `$0.recorder` / `$0.broadcaster` overrides are layered in a
+    /// nested `withDependencies` inside `operation` — they must capture
+    /// the same context that sees these stub ports.
+    fileprivate func withStubBaseDeps<R: Sendable>(
         _ operation: @Sendable () async throws -> R
     ) async rethrows -> R {
         try await withDependencies {
-            $0.recorder = recorder
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()

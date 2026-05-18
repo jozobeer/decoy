@@ -8,7 +8,7 @@ import Domain
 import InMemoryCameraSource
 import InMemoryClipStore
 import InMemoryVirtualCameraSink
-@testable import Broadcaster
+@testable import BroadcasterUseCase
 
 @Suite("BroadcasterPlayback", .timeLimit(.minutes(1)))
 struct BroadcasterPlaybackTests {
@@ -49,7 +49,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let frames = await collectFrames(from: sink, atLeast: 3)
             await broadcaster.shutdown()
 
@@ -69,7 +69,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let frames = await collectFrames(from: sink, atLeast: 0)
             await broadcaster.shutdown()
 
@@ -96,7 +96,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let frames = await collectFrames(from: sink, atLeast: 2)
             await broadcaster.shutdown()
 
@@ -117,7 +117,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let frames = await collectFrames(from: sink, atLeast: 2)
             // Settle and ensure no more frames arrive after the last preset.
             for _ in 0..<20 { await Task.yield() }
@@ -140,7 +140,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.loop))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
             let frames = await collectFrames(from: sink, atLeast: 9)
             await broadcaster.shutdown()
 
@@ -162,7 +162,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.pingPong))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.pingPong))
             let frames = await collectFrames(from: sink, atLeast: 9)
             await broadcaster.shutdown()
 
@@ -184,7 +184,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.pingPong))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.pingPong))
             let frames = await collectFrames(from: sink, atLeast: 5)
             await broadcaster.shutdown()
 
@@ -201,14 +201,14 @@ struct BroadcasterPlaybackTests {
         // returns the minimum gap instead so loop period stays ~duration,
         // not 2 × duration.
         let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
-        let gap = Broadcaster.gapBetween(current: 2, next: 0, frames: frames, mode: .loop)
+        let gap = BroadcasterUseCaseImpl.gapBetween(current: 2, next: 0, frames: frames, mode: .loop)
 
         #expect(gap == 0.001)
     }
 
     @Test func gapBetween_loopForward_usesPtsDelta() async {
         let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
-        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
+        let gap = BroadcasterUseCaseImpl.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
 
         // (0.1 - 0.0) within float tolerance
         #expect(abs(gap - 0.1) < 1e-9)
@@ -216,7 +216,7 @@ struct BroadcasterPlaybackTests {
 
     @Test func gapBetween_onceForward_usesPtsDelta() async {
         let frames = [Self.frame(0.0, 0x01), Self.frame(0.5, 0x02)]
-        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .once)
+        let gap = BroadcasterUseCaseImpl.gapBetween(current: 0, next: 1, frames: frames, mode: .once)
 
         #expect(abs(gap - 0.5) < 1e-9)
     }
@@ -225,7 +225,7 @@ struct BroadcasterPlaybackTests {
         // PingPong reverse step (2 → 1) is still a physical-neighbour
         // transition — gap should be the pts delta, NOT minimumFrameGap.
         let frames = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
-        let gap = Broadcaster.gapBetween(current: 2, next: 1, frames: frames, mode: .pingPong)
+        let gap = BroadcasterUseCaseImpl.gapBetween(current: 2, next: 1, frames: frames, mode: .pingPong)
 
         #expect(abs(gap - 0.1) < 1e-9)
     }
@@ -234,7 +234,7 @@ struct BroadcasterPlaybackTests {
         // Identical pts (degenerate clip) must not return 0 — that would
         // hot-spin the routing task.
         let frames = [Self.frame(0.0, 0x01), Self.frame(0.0, 0x02)]
-        let gap = Broadcaster.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
+        let gap = BroadcasterUseCaseImpl.gapBetween(current: 0, next: 1, frames: frames, mode: .loop)
 
         #expect(gap == 0.001)
     }
@@ -254,7 +254,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster()
+            let broadcaster = BroadcasterUseCaseImpl()
             // Live frames come through first.
             let live = await collectFrames(from: sink, atLeast: 1)
             #expect(live.count == 1)
@@ -284,7 +284,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.loop))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
             let beforeReturn = await collectFrames(from: sink, atLeast: 3)
             #expect(beforeReturn.count >= 3)
 
@@ -335,7 +335,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let first = await collectFrames(from: sink, atLeast: 2)
             #expect(first.count == 2)
 
@@ -362,7 +362,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.once))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
             let initial = await collectFrames(from: sink, atLeast: 0)
             #expect(initial.isEmpty)
 
@@ -386,7 +386,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(.loop))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(.loop))
             _ = await collectFrames(from: sink, atLeast: 6)
             await broadcaster.shutdown()
 
@@ -410,7 +410,7 @@ struct BroadcasterPlaybackTests {
             $0.virtualCameraSink = sink
             $0.continuousClock = ImmediateClock()
         } operation: {
-            let broadcaster = Broadcaster(state: .playback(mode))
+            let broadcaster = BroadcasterUseCaseImpl(state: .playback(mode))
             let frames = await collectFrames(from: sink, atLeast: 0)
             await broadcaster.shutdown()
 

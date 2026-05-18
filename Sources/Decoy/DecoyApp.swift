@@ -1,13 +1,11 @@
 import AppCommandDispatcher
 import AppKit
-import Broadcaster
 import Dependencies
 import DependencyInjection
 import Domain
 import HotkeyService
 import MenuBarUI
 import OSLog
-import RecorderUseCase
 import SwiftUI
 
 @main
@@ -26,10 +24,12 @@ struct DecoyApp: App {
 /// SPM executables have no Info.plist to set `LSUIElement`, so the
 /// activation policy is flipped programmatically on launch.
 ///
-/// Owns the Broadcaster / dispatcher / view-model graph so that
-/// global hotkeys と menu bar UI が同じ actor インスタンスへ dispatch
-/// する（コマンド経路を一本化）。Recorder は `@Dependency(\.recorder)`
-/// 経由で DI 解決 ― live は `RecorderUseCaseImpl()` singleton。
+/// Owns the dispatcher / view-model graph. Recorder / Broadcaster は
+/// `@Dependency(\.recorder)` / `@Dependency(\.broadcaster)` 経由で
+/// DI 解決 ― live は `RecorderUseCaseImpl()` / `BroadcasterUseCaseImpl()`
+/// の singleton。グローバルホットキーとメニューバー UI は同じ
+/// dispatcher を介して同じ actor インスタンスへ dispatch する
+/// （コマンド経路を一本化）。
 ///
 /// Global hotkey 4 つは起動時に `HotkeyService` へ register し、
 /// 終了時に `unregisterAll` で解放する。HotKey ライブラリは Carbon の
@@ -42,9 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AppDelegate")
 
-    let broadcaster = Broadcaster()
-    lazy var dispatcher = AppCommandDispatcher(broadcaster: broadcaster)
-    lazy var viewModel = MenuBarViewModel(broadcaster: broadcaster, dispatcher: dispatcher)
+    lazy var dispatcher = AppCommandDispatcher()
+    lazy var viewModel = MenuBarViewModel(dispatcher: dispatcher)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
