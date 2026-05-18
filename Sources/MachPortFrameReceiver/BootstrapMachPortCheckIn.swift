@@ -9,12 +9,19 @@ import Foundation
 ///
 /// `messages(serviceName:)`:
 /// 1. `bootstrap_check_in` で service name を launchd に登録 ― receive
-///    right を得る (caller = this server がライフタイム所有)。
+///    right を得る。所有は recv loop の `AsyncThrowingStream`
+///    `onTermination` に委譲され、stream が終わる時 (subscriber drop /
+///    receiver `stop()` / Task cancel) に
+///    `mach_port_mod_refs(MACH_PORT_RIGHT_RECEIVE, -1)` で破棄される。
 /// 2. background `Task.detached` で `mach_msg(MACH_RCV_MSG)` を回し、
 ///    1 message ごとに `FrameMachMessage` 形式で decode ―
 ///    `IncomingFrameMessage` を `AsyncThrowingStream` に yield。
-/// 3. `stop()` で receive right を `mach_port_mod_refs(-1)` して loop を
-///    壊す。task は cancel 経由 + recv 失敗で自然終了。
+///
+/// `stop()`:
+/// - server は receive port を所有しないため no-op。停止経路は
+///   orchestrator (`MachPortFrameReceiver.stop()`) が
+///   `listenTask?.cancel()` → stream `onTermination` を発火 →
+///   `mach_port_mod_refs(-1)` という cancel-propagation で実現する。
 ///
 /// Coverage note: bootstrap_check_in / mach_msg は launchd と実 IPC を
 /// 必要とするためユニットテスト対象外。orchestrator
@@ -43,9 +50,10 @@ extension BootstrapMachPortCheckIn {
     }
 
     public func stop() async {
-        // 現実装では receive right の所有を recv loop task に渡しており、
-        // task cancel で loop が抜ける際に port を deallocate する。
-        // server 単体での stop は no-op。
+        // receive port の所有は `AsyncThrowingStream` の `onTermination`
+        // (in `MachPortRecvLoop.stream`) に委譲済みのため、server 単体での
+        // stop は no-op。停止経路は orchestrator の listenTask cancel が
+        // stream onTermination を発火させる cancel-propagation で実現。
     }
 }
 

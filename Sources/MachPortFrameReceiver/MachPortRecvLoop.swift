@@ -36,21 +36,39 @@ enum MachPortRecvLoop {
         receivePort: mach_port_t,
         continuation: AsyncThrowingStream<IncomingFrameMessage, Error>.Continuation
     ) {
-        var message = FrameMachMessage()
+        var message = FrameMachMessageWithTrailer()
+        // Mach recv buffer は message 本体に加えて kernel が付与する
+        // trailer 分の余白が要る。足りないと `MACH_RCV_TOO_LARGE` で
+        // 第一通から失敗する。`mach_msg_max_trailer_t` のサイズで包む。
+        let bufferSize = mach_msg_size_t(MemoryLayout<FrameMachMessageWithTrailer>.size)
         while !Task.isCancelled {
-            let size = mach_msg_size_t(MemoryLayout<FrameMachMessage>.size)
-            let result = withUnsafeMutablePointer(to: &message.header) { headerPtr in
-                mach_msg(headerPtr, MACH_RCV_MSG, 0, size, receivePort, MACH_MSG_TIMEOUT_NONE, mach_port_t(MACH_PORT_NULL))
+            let result = withUnsafeMutablePointer(to: &message.message.header) { headerPtr in
+                mach_msg(headerPtr, MACH_RCV_MSG, 0, bufferSize, receivePort, MACH_MSG_TIMEOUT_NONE, mach_port_t(MACH_PORT_NULL))
             }
             guard result == MACH_MSG_SUCCESS else {
                 continuation.finish(throwing: MachPortReceiverError.recvFailed(code: Int(result)))
                 return
             }
+            // Defensive header validation. host (`MachPortMessageSender`)
+            // emits exactly this shape; anything else is a malformed /
+            // foreign message and must be destroyed rather than decoded
+            // (reading `surfacePort.name` on a wrong-shaped buffer would
+            // either reference garbage or leak the receive side of an
+            // unrelated send right that landed in the port queue).
+            let bits = message.message.header.msgh_bits & mach_msg_bits_t(MACH_MSGH_BITS_COMPLEX)
+            guard message.message.header.msgh_id == FrameMachMessage.id,
+                  bits != 0,
+                  message.message.body.msgh_descriptor_count == 1 else {
+                withUnsafeMutablePointer(to: &message.message.header) { headerPtr in
+                    mach_msg_destroy(headerPtr)
+                }
+                continue
+            }
             continuation.yield(IncomingFrameMessage(
-                surfacePort: ReceiverMachPortToken(raw: UInt32(message.surfacePort.name)),
-                presentationTime: TimeInterval(message.presentationTime),
-                width: Int(message.width),
-                height: Int(message.height)
+                surfacePort: ReceiverMachPortToken(raw: UInt32(message.message.surfacePort.name)),
+                presentationTime: TimeInterval(message.message.presentationTime),
+                width: Int(message.message.width),
+                height: Int(message.message.height)
             ))
         }
         continuation.finish()
@@ -70,4 +88,11 @@ struct FrameMachMessage {
     var presentationTime: Float64 = 0
     var width: UInt32 = 0
     var height: UInt32 = 0
+}
+
+/// recv 用 buffer ― 本体 + kernel が付与する trailer 分。
+/// `mach_msg(MACH_RCV_MSG)` の receive size には trailer 込みで渡す。
+struct FrameMachMessageWithTrailer {
+    var message: FrameMachMessage = FrameMachMessage()
+    var trailer: mach_msg_max_trailer_t = mach_msg_max_trailer_t()
 }

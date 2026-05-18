@@ -73,7 +73,7 @@ extension MachPortFrameReceiver {
     /// 多重 subscriber 対応の Frame stream。subscribe 毎に独立した
     /// continuation を発行し、`broadcast(_:)` で全員に同じ Frame を
     /// 流す。subscriber が消えたら `onTermination` で自分の continuation
-    /// を tabel から外す。
+    /// を table から外す。
     public var frames: AsyncStream<Frame> {
         AsyncStream { continuation in
             let id = UUID()
@@ -93,12 +93,30 @@ extension MachPortFrameReceiver {
         }
         do {
             let stream = try await server.messages(serviceName: serviceName)
-            state = .listening
-            listenTask = Task { [weak self] in
-                await self?.consume(stream: stream)
+            // Race: caller can invoke stop() while we're suspended on the
+            // await above. If state has been moved out of .starting, we
+            // honour that ― drop the freshly-acquired stream (its
+            // onTermination releases the receive right) instead of
+            // springing back to .listening and ignoring the stop.
+            switch state {
+            case .starting:
+                state = .listening
+                listenTask = Task { [weak self] in
+                    await self?.consume(stream: stream)
+                }
+            case .idle, .listening, .stopped:
+                return
             }
         } catch {
-            state = .stopped
+            // Same race for the failure path: only flip to .stopped if the
+            // caller hasn't already done so (state == .starting). Always
+            // finish subscriber streams ― `for await` consumers should
+            // not wait forever when startup definitively failed (matches
+            // `stop()` and stream-end paths).
+            if case .starting = state {
+                state = .stopped
+            }
+            finishAllContinuations()
             throw error
         }
     }

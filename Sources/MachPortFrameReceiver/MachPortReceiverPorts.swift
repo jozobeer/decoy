@@ -65,10 +65,18 @@ public protocol IOSurfaceMaterializer: Sendable {
     func frame(from message: IncomingFrameMessage) async throws -> Frame
 }
 
-/// Errors the receiver layer can raise. `checkInFailed` is thrown
-/// synchronously from `start()`; `recvFailed` and `materializationFailed`
-/// arrive via the stream's error terminator and are surfaced through
-/// `Frame` consumers only after the actor moves to `.stopped`.
+/// Errors the receiver layer can raise.
+///
+/// - `checkInFailed` is thrown synchronously from `start()`.
+/// - `recvFailed` arrives via the server stream's error terminator;
+///   the actor reacts by moving to `.stopped` and finishing all
+///   subscribers (the error itself is currently not surfaced — frame
+///   consumers just see their stream end).
+/// - `surfaceLookupFailed` is thrown from the materializer per-frame
+///   and is caught + dropped by the actor (1 frame loss, loop
+///   continues). It does not reach `Frame` subscribers in any form;
+///   exposing materialize failures as events is a follow-up concern
+///   tracked alongside `events` stream design.
 public enum MachPortReceiverError: Error, Sendable, Equatable {
     case checkInFailed(serviceName: String, code: Int)
     case recvFailed(code: Int)

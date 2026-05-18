@@ -48,7 +48,7 @@ struct MachPortFrameReceiverTests {
 
     @Test
     func start_checkInFailure_movesToStopped_throws() async throws {
-        let server = FailingServer(error: MachPortReceiverError.checkInFailed(serviceName: "x", code: -1))
+        let server = FailFirstThenSucceedServer(error: MachPortReceiverError.checkInFailed(serviceName: "x", code: -1))
         let receiver = MachPortFrameReceiver(
             serviceName: "x",
             server: server,
@@ -60,15 +60,41 @@ struct MachPortFrameReceiverTests {
         } catch let error as MachPortReceiverError {
             #expect(error == .checkInFailed(serviceName: "x", code: -1))
         }
-        // 失敗後でも再 start で復帰可能
-        let server2 = ScriptedServer(messages: [])
-        let receiver2 = MachPortFrameReceiver(
-            serviceName: "x",
-            server: server2,
+        // 同一 instance で再 start ― 失敗後 state が .stopped に倒れて
+        // いれば retry できる契約。
+        try await receiver.start()
+        let calls = await server.callCount
+        #expect(calls == 2)
+        await receiver.stop()
+    }
+
+    @Test
+    func stopDuringStartup_doesNotResurrectListener() async throws {
+        let server = SuspendingServer()
+        let receiver = MachPortFrameReceiver(
+            serviceName: "test.service",
+            server: server,
             materializer: StubMaterializer()
         )
-        try await receiver2.start()
-        await receiver2.stop()
+        // start() の前に subscribe する ― stop() が finishAllContinuations
+        // を呼ぶことを観測したい。
+        let frames = await receiver.frames
+        async let startResult: Void = receiver.start()
+        await server.waitUntilMessagesCalled()
+        // start() は server.messages の await で suspending ― ここで
+        // stop() を割り込ませる。actor reentrancy で stop() は state
+        // を `.stopped` に倒し finishAllContinuations を呼ぶ。
+        await receiver.stop()
+        // start() を unblock。本来なら state = .listening に進みかけるが、
+        // race fix で `.stopped` を尊重して return するはず ― 再 listener
+        // は spawn されない。
+        await server.release()
+        _ = try await startResult
+        var collected = 0
+        for await _ in frames {
+            collected += 1
+        }
+        #expect(collected == 0)
     }
 
     @Test
@@ -224,14 +250,56 @@ private actor CountingServer: MachPortServer {
     }
 }
 
-private struct FailingServer: MachPortServer {
+private actor FailFirstThenSucceedServer: MachPortServer {
     let error: Error
+    var callCount = 0
+
+    init(error: Error) {
+        self.error = error
+    }
 
     func messages(serviceName _: String) async throws -> AsyncThrowingStream<IncomingFrameMessage, Error> {
-        throw error
+        callCount += 1
+        guard callCount > 1 else { throw error }
+        return AsyncThrowingStream { $0.finish() }
     }
 
     func stop() async {}
+}
+
+private actor SuspendingServer: MachPortServer {
+    private var entered = false
+    private var enteredContinuations: [CheckedContinuation<Void, Never>] = []
+    private var pendingRelease: CheckedContinuation<Void, Never>?
+
+    func messages(serviceName _: String) async throws -> AsyncThrowingStream<IncomingFrameMessage, Error> {
+        markEntered()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            pendingRelease = continuation
+        }
+        return AsyncThrowingStream { $0.finish() }
+    }
+
+    func stop() async {}
+
+    func waitUntilMessagesCalled() async {
+        guard !entered else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            enteredContinuations.append(continuation)
+        }
+    }
+
+    func release() {
+        pendingRelease?.resume()
+        pendingRelease = nil
+    }
+
+    private func markEntered() {
+        entered = true
+        let pending = enteredContinuations
+        enteredContinuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
 }
 
 private actor ToggleServer: MachPortServer {
