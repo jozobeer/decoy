@@ -15,7 +15,7 @@ struct RecorderIntegrationTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     private static func uuid(_ hex: String) throws -> UUID {
@@ -45,7 +45,7 @@ struct RecorderIntegrationTests {
         }
     }
 
-    @Test func startThenStop_transitionsStateIdleRecordingIdle() async {
+    @Test func startThenStop_transitionsStateIdleRecordingIdle() async throws {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
@@ -206,7 +206,7 @@ struct RecorderIntegrationTests {
         }
     }
 
-    @Test func emptySource_stateStillTransitionsCorrectly() async {
+    @Test func emptySource_stateStillTransitionsCorrectly() async throws {
         let source = InMemoryCameraSource(emitting: [])
         let store = InMemoryClipStore()
 

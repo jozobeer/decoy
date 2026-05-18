@@ -21,7 +21,7 @@ struct MenuBarViewModelTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     // MARK: - Initial state
@@ -86,12 +86,12 @@ struct MenuBarViewModelTests {
         }
     }
 
-    @Test func startRecording_thenStop_persistsClip_andRefreshesToIdle() async throws {
+    @Test func startRecording_thenStop_persistsClip_andRefreshesToIdle() async {
         // End-to-end: drive the real dispatcher and observe that the
         // view-model's `recordingState` ends at `.idle` after the
         // recorder's finish path runs. Tests both the dispatch wiring
         // and the post-dispatch state refresh.
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [Self.frame(0.0)])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -101,7 +101,7 @@ struct MenuBarViewModelTests {
         } operation: {
             let recorder = RecorderUseCaseImpl()
             let broadcaster = BroadcasterUseCaseImpl()
-            try await withDependencies {
+            await withDependencies {
                 $0.recorder = recorder
                 $0.broadcaster = broadcaster
             } operation: {
@@ -205,12 +205,12 @@ struct MenuBarViewModelTests {
 
     // MARK: - View helpers
 
-    @Test func isRecording_followsRecordingState() async throws {
+    @Test func isRecording_followsRecordingState() async {
         // An InMemoryCameraSource that never emits keeps the recorder's
         // consumption Task alive, so `recordingState` stays `.recording`
         // until `stopRecording` cancels it. A finite emit list would
         // race the assertion against the consumption Task's completion.
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = NeverEndingCameraSource()
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -220,7 +220,7 @@ struct MenuBarViewModelTests {
         } operation: {
             let recorder = RecorderUseCaseImpl()
             let broadcaster = BroadcasterUseCaseImpl()
-            try await withDependencies {
+            await withDependencies {
                 $0.recorder = recorder
                 $0.broadcaster = broadcaster
             } operation: {
@@ -255,8 +255,8 @@ struct MenuBarViewModelTests {
 
     // MARK: - Event-driven error surfacing
 
-    @Test func saveFailedEvent_surfacedAsErrorMessage() async throws {
-        try await withDependencies {
+    @Test func saveFailedEvent_surfacedAsErrorMessage() async {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [Self.frame(0.0)])
             $0.clipStore = FailingClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -266,7 +266,7 @@ struct MenuBarViewModelTests {
         } operation: {
             let recorder = RecorderUseCaseImpl()
             let broadcaster = BroadcasterUseCaseImpl()
-            try await withDependencies {
+            await withDependencies {
                 $0.recorder = recorder
                 $0.broadcaster = broadcaster
             } operation: {

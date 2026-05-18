@@ -3,76 +3,39 @@ import CoreMedia
 import CoreVideo
 import Domain
 
-/// Translates a NV12 `CMSampleBuffer` (delivered by AVFoundation) into
-/// a `Frame`.
+/// Translates a `CMSampleBuffer` delivered by AVFoundation into a
+/// pure-data `Frame` (raw pixel bytes + dims + format).
 ///
-/// The output `Frame.data` layout is the Y plane bytes followed by the
-/// interleaved CbCr plane bytes — both planes copied with their tight
-/// per-row width (row padding stripped). Downstream consumers
-/// (`Recorder`, `VirtualCameraSink`) treat `data` as opaque, so the
-/// only contract is "round-trippable bytes with deterministic layout".
+/// AVFoundation hands us a `CVPixelBuffer` backed by `IOSurface`; we
+/// lock its base address, copy the bytes into a `Data`, and let
+/// AVFoundation reclaim the pixel buffer after the callback. The copy
+/// is the price of keeping `Frame` actor-transferable in Swift 6.3 —
+/// see memory `project-iosurface-actor-bug`. The zero-copy benefit is
+/// restored at the Mach-port IPC boundary (PR 2), where the bytes are
+/// re-materialised into a fresh `IOSurface` for the Camera Extension.
 ///
-/// Returns `nil` when the sample buffer does not carry an image (e.g.,
-/// metadata-only buffers) — callers should ignore such buffers.
+/// Returns `nil` when the sample buffer carries no image (metadata-only
+/// buffers), the PTS is non-finite, or the base address cannot be
+/// locked.
 func frame(from sampleBuffer: CMSampleBuffer) -> Frame? {
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
         return nil
     }
     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     guard pts.isFinite else { return nil }
-    guard let bytes = bytesFromPixelBuffer(pixelBuffer) else { return nil }
-    return Frame(presentationTime: pts, data: bytes)
-}
-
-/// Copy a bi-planar NV12 pixel buffer into a tight `Data` blob.
-///
-/// Layout: `[Y plane (width*height bytes)][CbCr plane (width*height/2 bytes)]`.
-/// Row padding (stride > width) is stripped so the output is canonical.
-private func bytesFromPixelBuffer(_ pixelBuffer: CVPixelBuffer) -> Data? {
-    let lock = CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-    guard lock == kCVReturnSuccess else { return nil }
-    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-    let planeCount = CVPixelBufferGetPlaneCount(pixelBuffer)
-    guard planeCount == 2 else { return nil }
-
-    let yPlane = packedPlane(pixelBuffer: pixelBuffer, planeIndex: 0, bytesPerPixel: 1)
-    let cbCrPlane = packedPlane(pixelBuffer: pixelBuffer, planeIndex: 1, bytesPerPixel: 2)
-    guard let yPlane, let cbCrPlane else { return nil }
-    return yPlane + cbCrPlane
-}
-
-/// Copy one plane into a tight `Data` (no row padding). Returns `nil`
-/// if the plane's base address is missing.
-///
-/// - parameter bytesPerPixel: how many bytes of "data" exist per
-///   horizontal pixel on this plane. Y plane = 1, CbCr plane = 2
-///   (interleaved Cb,Cr samples).
-private func packedPlane(
-    pixelBuffer: CVPixelBuffer,
-    planeIndex: Int,
-    bytesPerPixel: Int
-) -> Data? {
-    guard let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex) else {
+    guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
         return nil
     }
-    let rows = CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex)
-    let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex)
-    let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex)
-    let widthBytes = width * bytesPerPixel
-    // Single allocation of the full packed plane, then copy each row's
-    // payload (stripping padding) directly into the buffer. The
-    // previous reduce(into:) variant allocated a temporary `Data` per
-    // row — at 30 fps with a 1080p Y plane that's 1080 allocations per
-    // frame, ~32400/s, which dominated translator cost.
-    var packed = Data(count: rows * widthBytes)
-    packed.withUnsafeMutableBytes { dst in
-        guard let dstBase = dst.baseAddress else { return }
-        (0..<rows).forEach { row in
-            let src = base.advanced(by: row * rowBytes)
-            let dstRow = dstBase.advanced(by: row * widthBytes)
-            memcpy(dstRow, src, widthBytes)
-        }
-    }
-    return packed
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+    let height = CVPixelBufferGetHeight(pixelBuffer)
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+    return Frame(
+        presentationTime: pts,
+        pixelData: Data(bytes: base, count: bytesPerRow * height),
+        width: CVPixelBufferGetWidth(pixelBuffer),
+        height: height,
+        pixelFormat: CVPixelBufferGetPixelFormatType(pixelBuffer),
+        bytesPerRow: bytesPerRow
+    )
 }

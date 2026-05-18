@@ -6,14 +6,24 @@ import Domain
 
 @Suite("AVCameraSource")
 struct AVCameraSourceTests {
+    private static func unitFrame(t: TimeInterval, payload: UInt8) -> Frame {
+        Frame(
+            presentationTime: t,
+            pixelData: Data(repeating: payload, count: 64),
+            width: 4, height: 4,
+            pixelFormat: 0x42475241, // 'BGRA'
+            bytesPerRow: 16
+        )
+    }
+
     // MARK: - frames() basic contract
 
     @Test("frames() returns an AsyncStream that yields frames pushed by the controller")
-    func framesYieldsControllerPushedFrames() async {
+    func framesYieldsControllerPushedFrames() async throws {
         let controller = FakeCaptureSessionController()
         let source = AVCameraSource(controller: controller)
-        let f1 = Frame(presentationTime: 0.0, data: Data([0x01]))
-        let f2 = Frame(presentationTime: 0.033, data: Data([0x02]))
+        let f1 = Self.unitFrame(t: 0.0, payload: 0x01)
+        let f2 = Self.unitFrame(t: 0.033, payload: 0x02)
 
         let stream = await source.frames()
         // Same scheduling race as `framesArePreservedInOrder`: wait
@@ -63,10 +73,10 @@ struct AVCameraSourceTests {
     }
 
     @Test("multiple concurrent subscribers each receive frames")
-    func multipleSubscribersReceiveFrames() async {
+    func multipleSubscribersReceiveFrames() async throws {
         let controller = FakeCaptureSessionController()
         let source = AVCameraSource(controller: controller)
-        let f = Frame(presentationTime: 1.0, data: Data([0xAB]))
+        let f = Self.unitFrame(t: 1.0, payload: 0xAB)
 
         let s1 = await source.frames()
         let s2 = await source.frames()
@@ -133,11 +143,11 @@ struct AVCameraSourceTests {
     // MARK: - frame ordering
 
     @Test("frames are delivered in the order they are pushed")
-    func framesArePreservedInOrder() async {
+    func framesArePreservedInOrder() async throws {
         let controller = FakeCaptureSessionController()
         let source = AVCameraSource(controller: controller)
         let frames = (0..<5).map { i in
-            Frame(presentationTime: Double(i) * 0.033, data: Data([UInt8(i)]))
+            Self.unitFrame(t: Double(i) * 0.033, payload: UInt8(i))
         }
 
         let stream = await source.frames()
@@ -215,7 +225,6 @@ struct AVCameraSourceTests {
         _ = await source.frames()
         await Task.yield()
         let pixelFormat = await controller.lastPixelFormat
-        // NV12: 420v
-        #expect(pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+        #expect(pixelFormat == kCVPixelFormatType_32BGRA)
     }
 }

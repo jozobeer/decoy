@@ -8,20 +8,21 @@ import Domain
 /// ```text
 /// <rootURL>/
 ///   <clip-uuid>/
-///     metadata.json     ← Codable header: id, recordedAt, duration, frame timings
+///     metadata.json     ← Codable header: id, recordedAt, duration, per-frame timing + pixel layout
 ///     frames/
-///       000000.bin      ← raw Frame.data, 6-digit zero-padded index
+///       000000.bin      ← raw pixel bytes (`Frame.pixelData`), 6-digit zero-padded index
 ///       000001.bin
 ///       ...
 ///   .staging/           ← write-temp-then-rename area (auto-managed)
 ///     <clip-uuid>/      ← in-flight clip being staged
 /// ```
 ///
-/// Each clip is a self-contained directory. `metadata.json` holds the clip's
-/// scalar fields plus an array of `presentationTime` values; the i-th entry
-/// corresponds to `frames/<i>.bin` on disk. Splitting frames into their own
-/// files lets the bytes round-trip bit-exact without base64 inflation and
-/// keeps `metadata.json` cheap to scan.
+/// Each clip is a self-contained directory. `metadata.json` carries
+/// the clip's scalar fields plus an array of per-frame records
+/// (`presentationTime`, `width`, `height`, `pixelFormat`,
+/// `bytesPerRow`); the i-th entry corresponds to `frames/<i>.bin`.
+/// Splitting pixel data into its own file keeps `metadata.json` cheap
+/// to scan and avoids base64 inflation.
 ///
 /// ## Atomicity
 ///
@@ -115,13 +116,21 @@ extension FileSystemClipStore {
         try fileManager.createDirectory(at: framesDir, withIntermediateDirectories: true)
         try clip.frames.enumerated().forEach { index, frame in
             let file = framesDir.appendingPathComponent(frameFilename(at: index))
-            try frame.data.write(to: file, options: .atomic)
+            try frame.pixelData.write(to: file, options: .atomic)
         }
         let metadata = ClipMetadata(
             id: clip.id,
             recordedAt: clip.recordedAt,
             duration: clip.duration,
-            frames: clip.frames.map { FrameMetadata(presentationTime: $0.presentationTime) }
+            frames: clip.frames.map { frame in
+                FrameMetadata(
+                    presentationTime: frame.presentationTime,
+                    width: frame.width,
+                    height: frame.height,
+                    pixelFormat: Int(frame.pixelFormat),
+                    bytesPerRow: frame.bytesPerRow
+                )
+            }
         )
         let json = try Self.encoder.encode(metadata)
         try json.write(to: stagingDir.appendingPathComponent("metadata.json"), options: .atomic)
@@ -133,7 +142,6 @@ extension FileSystemClipStore {
             try fileManager.moveItem(at: stagingDir, to: finalDir)
             return
         }
-        // `replaceItem` performs an atomic swap on macOS APFS.
         _ = try fileManager.replaceItemAt(finalDir, withItemAt: stagingDir)
     }
 }
@@ -148,7 +156,14 @@ extension FileSystemClipStore {
         let framesDir = clipDir.appendingPathComponent("frames", isDirectory: true)
         let frames = try metadata.frames.enumerated().map { index, frameMeta in
             let bytes = try Data(contentsOf: framesDir.appendingPathComponent(frameFilename(at: index)))
-            return Frame(presentationTime: frameMeta.presentationTime, data: bytes)
+            return Frame(
+                presentationTime: frameMeta.presentationTime,
+                pixelData: bytes,
+                width: frameMeta.width,
+                height: frameMeta.height,
+                pixelFormat: OSType(frameMeta.pixelFormat),
+                bytesPerRow: frameMeta.bytesPerRow
+            )
         }
         return Clip(
             id: metadata.id,
@@ -194,6 +209,10 @@ extension FileSystemClipStore {
 
     private struct FrameMetadata: Codable, Sendable {
         let presentationTime: TimeInterval
+        let width: Int
+        let height: Int
+        let pixelFormat: Int
+        let bytesPerRow: Int
     }
 
     private static let encoder: JSONEncoder = {

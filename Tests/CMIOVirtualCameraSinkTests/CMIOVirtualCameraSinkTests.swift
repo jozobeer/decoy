@@ -6,15 +6,15 @@ import InMemoryFrameTransport
 
 @Suite("CMIOVirtualCameraSink")
 struct CMIOVirtualCameraSinkTests {
-    private func frame(t: TimeInterval = 0, label: String = "") -> Frame {
-        Frame(presentationTime: t, data: Data(label.utf8))
+    private func frame(t: TimeInterval = 0, payload: UInt8 = 0) -> Frame {
+        Frame(presentationTime: t, pixelData: Data(repeating: payload, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     @Test func send_whenConnected_forwardsToTransport() async throws {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
         let sink = CMIOVirtualCameraSink(transport: transport)
-        let f = frame(t: 1, label: "a")
+        let f = frame(t: 1, payload: 0xA1)
         try await sink.send(f)
         let sent = await transport.sentFrames
         #expect(sent == [f])
@@ -23,7 +23,7 @@ struct CMIOVirtualCameraSinkTests {
     @Test func send_whenNotConnected_autoConnectsAndForwards() async throws {
         let transport = InMemoryFrameTransport()
         let sink = CMIOVirtualCameraSink(transport: transport)
-        let f = frame(t: 1, label: "a")
+        let f = frame(t: 1, payload: 0xA1)
         try await sink.send(f)
         let sent = await transport.sentFrames
         let connected = await transport.isConnected
@@ -35,9 +35,9 @@ struct CMIOVirtualCameraSinkTests {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
         let sink = CMIOVirtualCameraSink(transport: transport)
-        let f1 = frame(t: 1, label: "a")
-        let f2 = frame(t: 2, label: "b")
-        let f3 = frame(t: 3, label: "c")
+        let f1 = frame(t: 1, payload: 0xA1)
+        let f2 = frame(t: 2, payload: 0xB2)
+        let f3 = frame(t: 3, payload: 0xC3)
         try await sink.send(f1)
         try await sink.send(f2)
         try await sink.send(f3)
@@ -50,16 +50,18 @@ struct CMIOVirtualCameraSinkTests {
         try await transport.connect()
         await transport.disconnect()
         let sink = CMIOVirtualCameraSink(transport: transport)
+        let f = frame(t: 1, payload: 0xA1)
         await #expect(throws: FrameTransportError.disconnectedDuringSend) {
-            try await sink.send(frame(t: 1, label: "a"))
+            try await sink.send(f)
         }
     }
 
     @Test func send_withFailingConnectTransport_propagatesError() async throws {
         let transport = FailingConnectTransport()
         let sink = CMIOVirtualCameraSink(transport: transport)
+        let f = frame(t: 1, payload: 0xA1)
         await #expect(throws: FrameTransportError.transport(reason: "connect refused")) {
-            try await sink.send(frame(t: 1, label: "a"))
+            try await sink.send(f)
         }
     }
 }

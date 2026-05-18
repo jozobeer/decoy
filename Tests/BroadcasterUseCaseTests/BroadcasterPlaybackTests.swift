@@ -18,7 +18,7 @@ struct BroadcasterPlaybackTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     private static func clip(
@@ -43,7 +43,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -55,15 +55,15 @@ struct BroadcasterPlaybackTests {
 
             #expect(frames.count == 3)
             #expect(frames.map(\.presentationTime) == [0.0, 0.1, 0.2])
-            #expect(frames.map { $0.data.first } == [0x01, 0x02, 0x03])
+            #expect(frames.map { $0.pixelData.first } == [0x01, 0x02, 0x03])
         }
     }
 
-    @Test func playbackInit_withEmptyStore_routesNothing() async throws {
+    @Test func playbackInit_withEmptyStore_routesNothing() async {
         let store = InMemoryClipStore()
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -90,7 +90,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([older, newer])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -100,7 +100,7 @@ struct BroadcasterPlaybackTests {
             let frames = await collectFrames(from: sink, atLeast: 2)
             await broadcaster.shutdown()
 
-            #expect(frames.map { $0.data.first } == [0xBB, 0xCC])
+            #expect(frames.map { $0.pixelData.first } == [0xBB, 0xCC])
         }
     }
 
@@ -111,7 +111,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -134,7 +134,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -145,7 +145,7 @@ struct BroadcasterPlaybackTests {
             await broadcaster.shutdown()
 
             // First 9 frames: 3 cycles of [0x01, 0x02, 0x03].
-            let firstNine = Array(frames.prefix(9)).map { $0.data.first }
+            let firstNine = Array(frames.prefix(9)).map { $0.pixelData.first }
             #expect(firstNine == [0x01, 0x02, 0x03, 0x01, 0x02, 0x03, 0x01, 0x02, 0x03])
         }
     }
@@ -156,7 +156,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -166,7 +166,7 @@ struct BroadcasterPlaybackTests {
             let frames = await collectFrames(from: sink, atLeast: 9)
             await broadcaster.shutdown()
 
-            let firstNine = Array(frames.prefix(9)).map { $0.data.first }
+            let firstNine = Array(frames.prefix(9)).map { $0.pixelData.first }
             #expect(firstNine == [0xA0, 0xB0, 0xC0, 0xB0, 0xA0, 0xB0, 0xC0, 0xB0, 0xA0])
         }
     }
@@ -178,7 +178,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -188,7 +188,7 @@ struct BroadcasterPlaybackTests {
             let frames = await collectFrames(from: sink, atLeast: 5)
             await broadcaster.shutdown()
 
-            let firstFive = Array(frames.prefix(5)).map { $0.data.first }
+            let firstFive = Array(frames.prefix(5)).map { $0.pixelData.first }
             #expect(firstFive == [0x55, 0x55, 0x55, 0x55, 0x55])
         }
     }
@@ -248,7 +248,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: clipPresets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = liveSource
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -258,7 +258,7 @@ struct BroadcasterPlaybackTests {
             // Live frames come through first.
             let live = await collectFrames(from: sink, atLeast: 1)
             #expect(live.count == 1)
-            #expect(live.first?.data.first == 0xAA)
+            #expect(live.first.flatMap { $0.pixelData.first } == 0xAA)
 
             await broadcaster.handle(.startDecoy(.once))
 
@@ -267,7 +267,7 @@ struct BroadcasterPlaybackTests {
             await broadcaster.shutdown()
 
             #expect(combined.count == 3)
-            #expect(combined.map { $0.data.first } == [0xAA, 0x11, 0x22])
+            #expect(combined.map { $0.pixelData.first } == [0xAA, 0x11, 0x22])
             #expect(await broadcaster.state == .playback(.once))
         }
     }
@@ -278,7 +278,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: clipPresets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = liveSource
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -306,13 +306,13 @@ struct BroadcasterPlaybackTests {
             var settled: [Frame] = []
             for _ in 0..<200 {
                 settled = await sink.frames
-                if settled.contains(where: { $0.data.first == 0xBB }) { break }
+                if settled.contains(where: { $0.pixelData.first == 0xBB }) { break }
                 await Task.megaYield()
             }
             await broadcaster.shutdown()
 
-            #expect(settled.contains(where: { $0.data.first == 0xAA }))
-            #expect(settled.contains(where: { $0.data.first == 0xBB }))
+            #expect(settled.contains(where: { $0.pixelData.first == 0xAA }))
+            #expect(settled.contains(where: { $0.pixelData.first == 0xBB }))
             #expect(await broadcaster.state == .live)
         }
     }
@@ -329,7 +329,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -344,7 +344,7 @@ struct BroadcasterPlaybackTests {
             await broadcaster.shutdown()
 
             #expect(total.count == 4)
-            #expect(total.map { $0.data.first } == [0x01, 0x02, 0x01, 0x02])
+            #expect(total.map { $0.pixelData.first } == [0x01, 0x02, 0x01, 0x02])
         }
     }
 
@@ -371,7 +371,7 @@ struct BroadcasterPlaybackTests {
             let after = await collectFrames(from: sink, atLeast: 2)
             await broadcaster.shutdown()
 
-            #expect(after.map { $0.data.first } == [0xAA, 0xBB])
+            #expect(after.map { $0.pixelData.first } == [0xAA, 0xBB])
         }
     }
 
@@ -380,7 +380,7 @@ struct BroadcasterPlaybackTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -400,11 +400,11 @@ struct BroadcasterPlaybackTests {
     }
 
     @Test(arguments: [PlaybackMode.once, .loop, .pingPong])
-    func playbackInit_emptyStore_acrossAllModes(mode: PlaybackMode) async throws {
+    func playbackInit_emptyStore_acrossAllModes(mode: PlaybackMode) async {
         let store = InMemoryClipStore()
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink

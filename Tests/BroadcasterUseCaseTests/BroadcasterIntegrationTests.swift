@@ -15,16 +15,16 @@ struct BroadcasterIntegrationTests {
     // MARK: - Fixtures
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     // MARK: - Live Mode Routing
 
-    @Test func defaultInit_routesLiveFramesToSink() async throws {
+    @Test func defaultInit_routesLiveFramesToSink() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -39,11 +39,11 @@ struct BroadcasterIntegrationTests {
         }
     }
 
-    @Test func explicitLiveInit_routesFramesToSink() async throws {
+    @Test func explicitLiveInit_routesFramesToSink() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -58,11 +58,11 @@ struct BroadcasterIntegrationTests {
     }
 
     @Test(arguments: [PlaybackMode.once, .loop, .pingPong])
-    func playbackInit_doesNotRouteFrames(mode: PlaybackMode) async throws {
+    func playbackInit_doesNotRouteFrames(mode: PlaybackMode) async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0), Self.frame(0.1)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -81,12 +81,12 @@ struct BroadcasterIntegrationTests {
         }
     }
 
-    @Test func multipleFrames_preservedInOrder() async throws {
+    @Test func multipleFrames_preservedInOrder() async {
         let presets = [Self.frame(0.0, 0x01), Self.frame(0.1, 0x02), Self.frame(0.2, 0x03)]
         let source = HoldingCameraSource(emitting: presets)
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -98,15 +98,15 @@ struct BroadcasterIntegrationTests {
 
             #expect(frames.count == 3)
             #expect(frames.map(\.presentationTime) == [0.0, 0.1, 0.2])
-            #expect(frames.map { $0.data.first } == [0x01, 0x02, 0x03])
+            #expect(frames.map { $0.pixelData.first } == [0x01, 0x02, 0x03])
         }
     }
 
-    @Test func sourceThatFinishesNaturally_completesRoutingCleanly() async throws {
+    @Test func sourceThatFinishesNaturally_completesRoutingCleanly() async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0), Self.frame(0.1)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -122,11 +122,11 @@ struct BroadcasterIntegrationTests {
 
     // MARK: - State Transitions
 
-    @Test func startDecoy_stopsRouting() async throws {
+    @Test func startDecoy_stopsRouting() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -149,11 +149,11 @@ struct BroadcasterIntegrationTests {
         }
     }
 
-    @Test func returnToLive_resumesRouting() async throws {
+    @Test func returnToLive_resumesRouting() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -177,11 +177,11 @@ struct BroadcasterIntegrationTests {
     }
 
     @Test(arguments: [AppCommand.startRecording, .stopRecording])
-    func foreignCommand_doesNotAffectRouting(foreign: AppCommand) async throws {
+    func foreignCommand_doesNotAffectRouting(foreign: AppCommand) async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -203,11 +203,11 @@ struct BroadcasterIntegrationTests {
 
     // MARK: - Idempotency / Resource Hygiene
 
-    @Test func returnToLive_whenAlreadyLive_doesNotDuplicateRouting() async throws {
+    @Test func returnToLive_whenAlreadyLive_doesNotDuplicateRouting() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -231,11 +231,11 @@ struct BroadcasterIntegrationTests {
         }
     }
 
-    @Test func startDecoy_whenAlreadyPlayback_doesNotRestartRouting() async throws {
+    @Test func startDecoy_whenAlreadyPlayback_doesNotRestartRouting() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()
@@ -253,11 +253,11 @@ struct BroadcasterIntegrationTests {
         }
     }
 
-    @Test func liveToPlaybackToLive_routingReSubscribesSource() async throws {
+    @Test func liveToPlaybackToLive_routingReSubscribesSource() async {
         let source = HoldingCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.virtualCameraSink = sink
             $0.clipStore = InMemoryClipStore()

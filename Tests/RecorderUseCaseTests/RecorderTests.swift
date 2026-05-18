@@ -4,7 +4,7 @@ import Domain
 
 @Suite("RecorderUseCaseImpl")
 struct RecorderTests {
-    @Test func defaultInit_startsIdle() async {
+    @Test func defaultInit_startsIdle() async throws {
         let recorder = RecorderUseCaseImpl()
         #expect(await recorder.state == .idle)
     }

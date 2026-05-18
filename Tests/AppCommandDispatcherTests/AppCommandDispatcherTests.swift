@@ -19,7 +19,7 @@ struct AppCommandDispatcherTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     // MARK: - Construction
@@ -46,13 +46,13 @@ struct AppCommandDispatcherTests {
 
     // MARK: - Per-command fan-out
 
-    @Test func dispatch_startRecording_reachesRecorderAndIsNoOpOnBroadcaster() async throws {
+    @Test func dispatch_startRecording_reachesRecorderAndIsNoOpOnBroadcaster() async {
         // Use an empty source so the recorder's consumption Task
         // terminates naturally after .startRecording — no frames saved
         // but the full begin→finish lifecycle was driven by the
         // dispatch. Broadcaster is pinned to .playback(.once) so we can
         // assert it stays untouched by recording commands.
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = InMemoryVirtualCameraSink()
@@ -62,7 +62,7 @@ struct AppCommandDispatcherTests {
         } operation: {
             let recorder = RecorderUseCaseImpl()
             let broadcaster = BroadcasterUseCaseImpl(state: .playback(.once))
-            try await withDependencies {
+            await withDependencies {
                 $0.recorder = recorder
                 $0.broadcaster = broadcaster
             } operation: {

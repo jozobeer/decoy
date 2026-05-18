@@ -15,7 +15,7 @@ struct RecorderEventsTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     // MARK: - Save Success → `.saved` 発火
@@ -71,12 +71,12 @@ struct RecorderEventsTests {
         }
     }
 
-    @Test func twoRecordings_emitSavedTwiceInOrder() async throws {
+    @Test func twoRecordings_emitSavedTwiceInOrder() async {
         let source1 = InMemoryCameraSource(emitting: [Self.frame(0.0, 0x01)])
         let source2 = InMemoryCameraSource(emitting: [Self.frame(0.0, 0x02)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
             $0.uuid = .incrementing
@@ -158,7 +158,7 @@ struct RecorderEventsTests {
         }
     }
 
-    @Test func saveFailure_returnsStateToIdle() async throws {
+    @Test func saveFailure_returnsStateToIdle() async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = FailingClipStore(onSave: TestError(label: "boom"))
 
@@ -280,11 +280,11 @@ struct RecorderEventsTests {
         }
     }
 
-    @Test func redundantStart_emitsSavedOnce() async throws {
+    @Test func redundantStart_emitsSavedOnce() async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -300,11 +300,11 @@ struct RecorderEventsTests {
         }
     }
 
-    @Test func redundantStop_emitsSavedOnce() async throws {
+    @Test func redundantStop_emitsSavedOnce() async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)

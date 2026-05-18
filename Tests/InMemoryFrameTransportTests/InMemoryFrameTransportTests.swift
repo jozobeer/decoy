@@ -5,8 +5,8 @@ import Domain
 
 @Suite("InMemoryFrameTransport")
 struct InMemoryFrameTransportTests {
-    private func frame(t: TimeInterval = 0, label: String = "") -> Frame {
-        Frame(presentationTime: t, data: Data(label.utf8))
+    private func frame(t: TimeInterval = 0, payload: UInt8 = 0) -> Frame {
+        Frame(presentationTime: t, pixelData: Data(repeating: payload, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     @Test func init_disconnected_andEmpty() async {
@@ -47,10 +47,11 @@ struct InMemoryFrameTransportTests {
         #expect(connected == false)
     }
 
-    @Test func send_beforeConnect_throwsNotConnected() async {
+    @Test func send_beforeConnect_throwsNotConnected() async throws {
         let transport = InMemoryFrameTransport()
+        let f = frame(t: 1, payload: 0xA1)
         await #expect(throws: FrameTransportError.notConnected) {
-            try await transport.send(frame(t: 1, label: "a"))
+            try await transport.send(f)
         }
     }
 
@@ -58,15 +59,16 @@ struct InMemoryFrameTransportTests {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
         await transport.disconnect()
+        let f = frame(t: 1, payload: 0xA1)
         await #expect(throws: FrameTransportError.disconnectedDuringSend) {
-            try await transport.send(frame(t: 1, label: "a"))
+            try await transport.send(f)
         }
     }
 
     @Test func send_oneFrame_roundTrip() async throws {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
-        let f = frame(t: 1, label: "hello")
+        let f = frame(t: 1, payload: 0xA1)
         try await transport.send(f)
         let sent = await transport.sentFrames
         #expect(sent == [f])
@@ -75,9 +77,9 @@ struct InMemoryFrameTransportTests {
     @Test func send_multipleFrames_preservesOrder() async throws {
         let transport = InMemoryFrameTransport()
         try await transport.connect()
-        let f1 = frame(t: 1, label: "a")
-        let f2 = frame(t: 2, label: "b")
-        let f3 = frame(t: 3, label: "c")
+        let f1 = frame(t: 1, payload: 0xA1)
+        let f2 = frame(t: 2, payload: 0xB2)
+        let f3 = frame(t: 3, payload: 0xC3)
         try await transport.send(f1)
         try await transport.send(f2)
         try await transport.send(f3)

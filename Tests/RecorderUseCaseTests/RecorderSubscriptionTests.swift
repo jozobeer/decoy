@@ -21,7 +21,7 @@ struct RecorderSubscriptionTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     @Test func subscription_isIterable() async throws {
@@ -52,13 +52,13 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func subscription_iteratorCancellation_removesSubscriber() async throws {
+    @Test func subscription_iteratorCancellation_removesSubscriber() async {
         // Iterator cancellation fires the AsyncStream's onTermination
         // which removes the actor-side subscriber slot.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -80,12 +80,12 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func multipleSubscriptions_independentCleanup() async throws {
+    @Test func multipleSubscriptions_independentCleanup() async {
         // Two subscribers; cancelling one must not affect the other.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -115,7 +115,7 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func subscription_explicitCancel_releasesSubscriber() async throws {
+    @Test func subscription_explicitCancel_releasesSubscriber() async {
         // Caller obtains `RecorderEvents` but never iterates (the
         // observing Task was cancelled before entering `for await`).
         // The passive value facade has no deinit-driven cleanup, so
@@ -126,7 +126,7 @@ struct RecorderSubscriptionTests {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -141,7 +141,7 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func subscription_explicitCancel_isIdempotent() async throws {
+    @Test func subscription_explicitCancel_isIdempotent() async {
         // `cancel()` may be invoked from multiple cleanup paths
         // (`defer` after `for await`, deinit chains in caller-side
         // wrappers). Calling it twice must not crash and must not
@@ -149,7 +149,7 @@ struct RecorderSubscriptionTests {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -163,7 +163,7 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func shutdown_blocksConcurrentHandle() async throws {
+    @Test func shutdown_blocksConcurrentHandle() async {
         // `shutdown()` sets a sticky `terminated` flag before its
         // `await`, so a concurrent `handle(.startRecording)` that
         // resumes via actor reentrancy must observe the flag and
@@ -172,7 +172,7 @@ struct RecorderSubscriptionTests {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)
@@ -186,12 +186,12 @@ struct RecorderSubscriptionTests {
         }
     }
 
-    @Test func shutdown_terminatesAllSubscribers() async throws {
+    @Test func shutdown_terminatesAllSubscribers() async {
         // shutdown() finishes every continuation and clears the dict.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = InMemoryClipStore()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.date = .constant(Self.fixedDate)

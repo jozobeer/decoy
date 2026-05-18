@@ -58,10 +58,14 @@ public actor AVCameraSource {
     static let perSubscriberBufferDepth = 8
 
     private static let logger = Logger(subsystem: "beer.jozo.decoy", category: "AVCameraSource")
-    /// NV12 (`420YpCbCr8BiPlanarVideoRange`) — chosen so the buffer is
-    /// compact (1.5 bytes/pixel) and natively supported by the
-    /// AVCaptureVideoDataOutput hardware path.
-    static let pixelFormat: OSType = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+    /// BGRA 8-bit (`kCVPixelFormatType_32BGRA`) — single-plane format
+    /// aligned with `DecoyCameraExtension`'s stream descriptor. Going
+    /// BGRA end-to-end (camera → ClipStore → CMIO sink) lets
+    /// `SampleBufferTranslator` copy a single contiguous byte run into
+    /// `Frame.pixelData` and lets the IPC boundary re-materialise the
+    /// `IOSurface` without plane gymnastics, at the cost of ~2.66×
+    /// memory vs NV12 (still trivial for desktop 720p/1080p streams).
+    static let pixelFormat: OSType = kCVPixelFormatType_32BGRA
 
     public init(controller: any CaptureSessionController) {
         self.controller = controller
