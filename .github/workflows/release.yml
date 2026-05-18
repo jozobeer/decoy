@@ -27,8 +27,13 @@ name: Release
 # Security note:
 # - 外部入力で本 workflow が受け取るのは TAG (push tag or workflow_dispatch input) のみ。
 #   PR title / body / commit message 等は一切参照しない (command injection 面なし)。
-# - TAG は SemVer 厳密 regex で validate してから shell に展開する。validation 前の
-#   shell 露出は無く、filesystem 安全性と shell-special 文字の不在を担保する。
+# - TAG は最初に `Validate tag shape` step (secret-free + quoted expansion) で
+#   SemVer 厳密 regex に通し、形が崩れていれば即 abort する。malformed TAG が
+#   shell に展開され得るのはこの secret-free な validation step 内に限られ、
+#   後段の secret-injected step には regex を通った形のみが届く。
+# - 続く `Abort if release tag is already published` も GH_TOKEN のみで動く
+#   secret-free step。signing/notarization secrets を materialize する前に
+#   published tag 再 run を弾けるよう、secrets verify より前に置いてある。
 # - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照する。
 
 on:
@@ -108,6 +113,24 @@ jobs:
             exit 1
           fi
 
+      # published 済 tag への再 run は archive 開始前に abort したい。本 step は GH_TOKEN のみ
+      # で動くため、signing/notarization secrets を materialize する前にここを通すことで、
+      # 既 publish 済 tag に対しては Developer ID / notarization 秘密が一切 shell に流れない。
+      - name: Abort if release tag is already published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # archive / notarize は数十分 + macOS runner 時間を食う。published 済 release を
+          # 上書きしないという守りは最終 upload step にもあるが、ここで早期 abort することで
+          # 無駄な runner 時間と sign 経路の発火を避ける。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+              exit 1
+            fi
+          fi
+
       - name: Verify required secrets
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
@@ -127,21 +150,6 @@ jobs:
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             exit 1
-          fi
-
-      - name: Abort if release tag is already published
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # archive / notarize は数十分 + macOS runner 時間を食う。published 済 release を
-          # 上書きしないという守りは最終 upload step にもあるが、ここで早期 abort することで
-          # 無駄な runner 時間と sign 経路の発火を避ける。
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
-            if [ "$IS_DRAFT" != "true" ]; then
-              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
-              exit 1
-            fi
           fi
 
       - name: Install xcodegen and create-dmg
