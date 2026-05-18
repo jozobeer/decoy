@@ -1,0 +1,199 @@
+name: Release
+
+# Decoy.app を Developer ID signed + notarized で release する。
+# Trigger:
+#   - push tag `v*` (e.g. `v0.1.0`)
+#   - workflow_dispatch (tag input 必須 ― CI 上で再実行する用)
+#
+# Required repo secrets:
+#   MACOS_CERTIFICATE_P12           base64-encoded P12 (Developer ID Application)
+#   MACOS_CERTIFICATE_PASSWORD      P12 export password
+#   MACOS_KEYCHAIN_PASSWORD         ephemeral keychain password (任意の文字列でよい)
+#   APPLE_DEVELOPMENT_TEAM          Apple Developer Team ID (10桁)
+#   APPLE_ID                        notarization 用 Apple ID
+#   APPLE_APP_PASSWORD              app-specific password
+#
+# Security note:
+# - 外部入力 (PR title / body / commit message 等) を一切 shell に渡さない
+# - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照
+# - tag 名は github.ref_name から取るが、`v*` フィルタで形が固定されているため
+#   コマンド注入の余地なし
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          missing=()
+          [ -z "$MACOS_CERTIFICATE_P12" ] && missing+=(MACOS_CERTIFICATE_P12)
+          [ -z "$MACOS_CERTIFICATE_PASSWORD" ] && missing+=(MACOS_CERTIFICATE_PASSWORD)
+          [ -z "$MACOS_KEYCHAIN_PASSWORD" ] && missing+=(MACOS_KEYCHAIN_PASSWORD)
+          [ -z "$APPLE_DEVELOPMENT_TEAM" ] && missing+=(APPLE_DEVELOPMENT_TEAM)
+          [ -z "$APPLE_ID" ] && missing+=(APPLE_ID)
+          [ -z "$APPLE_APP_PASSWORD" ] && missing+=(APPLE_APP_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Install xcodegen and create-dmg
+        run: brew install xcodegen create-dmg
+
+      - name: Generate Decoy.xcodeproj
+        run: xcodegen generate
+
+      - name: Import signing certificate into temporary keychain
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Archive Decoy.app
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/Decoy.xcarchive"
+          xcodebuild archive \
+            -project Decoy.xcodeproj \
+            -scheme Decoy \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \
+            CODE_SIGN_IDENTITY="Developer ID Application"
+          echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
+
+      - name: Export signed .app from archive
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          EXPORT_DIR="$RUNNER_TEMP/export"
+          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+          cat > "$EXPORT_OPTIONS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>teamID</key>
+            <string>__APPLE_DEVELOPMENT_TEAM__</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+          </dict>
+          </plist>
+          PLIST
+          # team ID をプレースホルダ経由で挿入し、heredoc 内に secret を直接書かない
+          /usr/bin/sed -i '' "s/__APPLE_DEVELOPMENT_TEAM__/$APPLE_DEVELOPMENT_TEAM/" "$EXPORT_OPTIONS"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist "$EXPORT_OPTIONS"
+          APP_PATH="$EXPORT_DIR/Decoy.app"
+          [ -d "$APP_PATH" ] || { echo "::error::Decoy.app not found at $APP_PATH"; exit 1; }
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "EXPORT_DIR=$EXPORT_DIR" >> "$GITHUB_ENV"
+
+      - name: Create DMG
+        run: |
+          DMG_PATH="$RUNNER_TEMP/Decoy-${TAG}.dmg"
+          create-dmg \
+            --volname "Decoy ${TAG}" \
+            --window-size 540 380 \
+            --icon-size 96 \
+            --icon "Decoy.app" 140 190 \
+            --app-drop-link 400 190 \
+            --no-internet-enable \
+            "$DMG_PATH" \
+            "$EXPORT_DIR"
+          [ -f "$DMG_PATH" ] || { echo "::error::DMG not created at $DMG_PATH"; exit 1; }
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_DEVELOPMENT_TEAM" \
+            --wait
+
+      - name: Staple notarization ticket
+        run: xcrun stapler staple "$DMG_PATH"
+
+      - name: Verify Gatekeeper acceptance
+        run: |
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --draft
+          fi
+          gh release upload "$TAG" "$DMG_PATH" --clobber
+
+      - name: Cleanup temporary keychain
+        if: always()
+        env:
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
