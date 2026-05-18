@@ -238,6 +238,43 @@ struct FileSystemClipStoreTests {
         }
     }
 
+    // MARK: - Corrupted metadata — surfaces as invalidMetadata, not a trap
+
+    @Test func clip_invalidPixelFormat_throwsInvalidMetadata() async throws {
+        let tmp = Self.makeTempRoot()
+        let store = FileSystemClipStore(rootURL: tmp.url)
+        let c = makeClip(frames: makeFrames(count: 1))
+        try await store.save(c)
+        // Rewrite metadata.json with pixelFormat = -1 (out of UInt32 range).
+        let clipDir = tmp.url.appendingPathComponent(c.id.uuidString, isDirectory: true)
+        let metadataURL = clipDir.appendingPathComponent("metadata.json")
+        let raw = try Data(contentsOf: metadataURL)
+        let mutated = String(data: raw, encoding: .utf8)?
+            .replacingOccurrences(of: "\"pixelFormat\":1111970369", with: "\"pixelFormat\":-1")
+        let mutatedData = try #require(mutated?.data(using: .utf8))
+        try mutatedData.write(to: metadataURL)
+        await #expect(throws: FileSystemClipStoreError.self) {
+            _ = try await store.clip(id: c.id)
+        }
+    }
+
+    @Test func clip_negativeDimension_throwsInvalidMetadata() async throws {
+        let tmp = Self.makeTempRoot()
+        let store = FileSystemClipStore(rootURL: tmp.url)
+        let c = makeClip(frames: makeFrames(count: 1))
+        try await store.save(c)
+        let clipDir = tmp.url.appendingPathComponent(c.id.uuidString, isDirectory: true)
+        let metadataURL = clipDir.appendingPathComponent("metadata.json")
+        let raw = try Data(contentsOf: metadataURL)
+        let mutated = String(data: raw, encoding: .utf8)?
+            .replacingOccurrences(of: "\"width\":2", with: "\"width\":-2")
+        let mutatedData = try #require(mutated?.data(using: .utf8))
+        try mutatedData.write(to: metadataURL)
+        await #expect(throws: FileSystemClipStoreError.self) {
+            _ = try await store.clip(id: c.id)
+        }
+    }
+
     // MARK: - Concurrency (actor must serialize)
 
     @Test func concurrentSaves_allObservedInAll() async throws {

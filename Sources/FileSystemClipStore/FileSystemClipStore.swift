@@ -156,12 +156,23 @@ extension FileSystemClipStore {
         let framesDir = clipDir.appendingPathComponent("frames", isDirectory: true)
         let frames = try metadata.frames.enumerated().map { index, frameMeta in
             let bytes = try Data(contentsOf: framesDir.appendingPathComponent(frameFilename(at: index)))
+            guard let pixelFormat = OSType(exactly: frameMeta.pixelFormat) else {
+                throw FileSystemClipStoreError.invalidMetadata(
+                    clipDir, "pixelFormat \(frameMeta.pixelFormat) out of OSType (UInt32) range"
+                )
+            }
+            guard frameMeta.width >= 0, frameMeta.height >= 0, frameMeta.bytesPerRow >= 0 else {
+                throw FileSystemClipStoreError.invalidMetadata(
+                    clipDir,
+                    "negative dimension(s): width=\(frameMeta.width) height=\(frameMeta.height) bytesPerRow=\(frameMeta.bytesPerRow)"
+                )
+            }
             return Frame(
                 presentationTime: frameMeta.presentationTime,
                 pixelData: bytes,
                 width: frameMeta.width,
                 height: frameMeta.height,
-                pixelFormat: OSType(frameMeta.pixelFormat),
+                pixelFormat: pixelFormat,
                 bytesPerRow: frameMeta.bytesPerRow
             )
         }
@@ -240,4 +251,9 @@ private func frameFilename(at index: Int) -> String {
 public enum FileSystemClipStoreError: Error, Sendable, Equatable {
     /// A non-directory file exists at the expected directory path.
     case notADirectory(URL)
+    /// `metadata.json` decoded but contains values outside the legal
+    /// range for `Frame` (e.g. `pixelFormat` outside `UInt32`, negative
+    /// dimensions). Carries the clip directory and a human-readable
+    /// reason for diagnostics.
+    case invalidMetadata(URL, String)
 }
