@@ -68,18 +68,16 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      # workflow_dispatch では default ref が選択 branch になり、tag-input と乖離する。
-      # 必ず TAG を `refs/tags/` qualified で明示 checkout する ― 同名 branch があっても
-      # tag が選ばれることを保証する。
+      # checkout ref は github.ref_name のみから派生させる ― push tag では起動 ref = tag、
+      # workflow_dispatch では UI 選択 ref = environment-approved ref であり、いずれの
+      # 場合も「approval を受けた ref」と一致する。`refs/tags/` 修飾で同名 branch と
+      # 衝突しないことも保証する。inputs.tag を直接使うと、approved ref と異なる任意の
+      # tag を fetch できてしまう (後段の workflow_dispatch ref guard より前に走るため)。
+      # inputs.tag と github.ref_name の一致は別 step で必須化する。
       # persist-credentials: false ― default では git config に GITHUB_TOKEN が
       # 焼き込まれるが、本 job は contents: write を持ち xcodebuild が build phase /
       # SPM plugin から token を読める導線がある。release artifact 生成 phase に
       # token は不要なので明示 OFF する。
-      # checkout ref は github.ref_name から派生させる ― push tag では起動 ref = tag、
-      # workflow_dispatch では UI 選択 ref = environment-approved ref であり、いずれの
-      # 場合も「approval を受けた ref」と一致する。inputs.tag を直接使うと、approved ref
-      # と異なる任意の tag を fetch できてしまう (後段の workflow_dispatch ref guard より
-      # 前に走るため)。inputs.tag と github.ref_name の一致は別 step で必須化する。
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ github.ref_name }}
@@ -128,13 +126,31 @@ jobs:
           # archive / notarize は数十分 + macOS runner 時間を食う。published 済 release を
           # 上書きしないという守りは最終 upload step にもあるが、ここで早期 abort することで
           # 無駄な runner 時間と sign 経路の発火を避ける。
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
-            if [ "$IS_DRAFT" != "true" ]; then
-              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+          # fail-closed 設計: 404 (release 未作成) のみ「進めて OK」とし、auth / rate-limit /
+          # transient API error はすべて abort する。`gh release view` だと exit code が
+          # error と not-found を区別しないため、REST API で HTTP status を直接判定する。
+          set +e
+          response=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" -i 2>&1)
+          rc=$?
+          set -e
+          http_status=$(printf '%s\n' "$response" | awk 'NR==1 {print $2; exit}')
+          case "$http_status" in
+            200)
+              is_draft=$(printf '%s\n' "$response" | sed -n '/^{/,$p' | jq -r .draft)
+              if [ "$is_draft" != "true" ]; then
+                echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+                exit 1
+              fi
+              ;;
+            404)
+              # 未作成 ― 後段 upload step が draft で create する
+              ;;
+            *)
+              echo "::error::Failed to query release status for $TAG (HTTP $http_status, rc=$rc):"
+              printf '%s\n' "$response" >&2
               exit 1
-            fi
-          fi
+              ;;
+          esac
 
       - name: Verify required secrets
         env:
