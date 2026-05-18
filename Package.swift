@@ -144,6 +144,7 @@ let package = Package(
                 "SystemExtensionInstaller",
                 "InMemorySystemExtensionInstaller",
                 "InMemoryFrameTransport",
+                "MachPortFrameTransport",
                 "CMIOVirtualCameraSink",
                 "HotkeyService",
                 "RecorderUseCase",
