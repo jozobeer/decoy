@@ -17,7 +17,7 @@ struct IOSurfaceFactoryTests {
         #expect(surface.height == height)
         #expect(surface.bytesPerRow == width * 4)
 
-        let readBack = IOSurfaceFactory.readBytes(surface)
+        let readBack = try IOSurfaceFactory.readBytes(surface)
         #expect(readBack.prefix(pixels.count) == pixels)
     }
 
@@ -33,16 +33,90 @@ struct IOSurfaceFactoryTests {
 
     @Test("readBytes returns an independent copy")
     func readBytes_returnsIndependentCopy() throws {
-        let width = 2
+        // 4×2 keeps `bytesPerRow = 16` ≥ macOS IOSurface's GPU-alignment
+        // floor; a 2×2 surface (`bytesPerRow = 8`) is in the zone where
+        // the kernel may reject the allocation or silently round the
+        // stride, making the test flake on stride-padded paths.
+        let width = 4
         let height = 2
-        let initial = Data([0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
-                            0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0x00])
+        let initial = Data((0..<(width * height * 4)).map { UInt8($0 & 0xFF) })
         let surface = try IOSurfaceFactory.makeBGRA(width: width, height: height, bytes: initial)
 
-        var firstRead = IOSurfaceFactory.readBytes(surface)
+        var firstRead = try IOSurfaceFactory.readBytes(surface)
         firstRead[0] = 0xFF
 
-        let secondRead = IOSurfaceFactory.readBytes(surface)
-        #expect(secondRead.first == 0x10)
+        let secondRead = try IOSurfaceFactory.readBytes(surface)
+        #expect(secondRead.first == initial.first)
+    }
+
+    @Test("make rejects negative dimensions")
+    func make_rejectsNegativeDimensions() {
+        let bytes = Data(repeating: 0, count: 64)
+        #expect(throws: IOSurfaceFactoryError.self) {
+            try IOSurfaceFactory.make(
+                width: -1,
+                height: 1,
+                pixelFormat: 0x42475241,
+                bytesPerElement: 4,
+                bytesPerRow: 4,
+                bytes: bytes
+            )
+        }
+        #expect(throws: IOSurfaceFactoryError.self) {
+            try IOSurfaceFactory.make(
+                width: 1,
+                height: -1,
+                pixelFormat: 0x42475241,
+                bytesPerElement: 4,
+                bytesPerRow: 4,
+                bytes: bytes
+            )
+        }
+    }
+
+    @Test("make rejects allocSize overflow")
+    func make_rejectsAllocSizeOverflow() {
+        let bytes = Data(repeating: 0, count: 64)
+        #expect(throws: IOSurfaceFactoryError.self) {
+            try IOSurfaceFactory.make(
+                width: 1,
+                height: Int.max,
+                pixelFormat: 0x42475241,
+                bytesPerElement: 4,
+                bytesPerRow: Int.max,
+                bytes: bytes
+            )
+        }
+    }
+
+    @Test("makeBGRA rejects width that overflows bytesPerRow")
+    func makeBGRA_rejectsBytesPerRowOverflow() {
+        let bytes = Data(repeating: 0, count: 64)
+        #expect(throws: IOSurfaceFactoryError.self) {
+            try IOSurfaceFactory.makeBGRA(width: Int.max, height: 1, bytes: bytes)
+        }
+    }
+
+    @Test("writeBytes honours surface-resolved row stride")
+    func writeBytes_usesResolvedStride() throws {
+        // 4×2 BGRA: bytesPerRow=16 is already 16-byte aligned so the
+        // surface keeps it intact and a full round-trip is byte-exact.
+        // This guards against accidental contiguous memcpy of
+        // `bytesPerRow*height` bytes — the surface's resolved
+        // `bytesPerRow` is what writeBytes must walk over per row.
+        let width = 4
+        let height = 2
+        // distinct value per row so a row-shift would be detectable
+        let row0 = Data(repeating: 0xAA, count: width * 4)
+        let row1 = Data(repeating: 0xBB, count: width * 4)
+        let surface = try IOSurfaceFactory.makeBGRA(width: width, height: height, bytes: row0 + row1)
+
+        let bytesPerRow = surface.bytesPerRow
+        let readBack = try IOSurfaceFactory.readBytes(surface)
+        // row 0 starts at offset 0
+        #expect(readBack[0] == 0xAA)
+        // row 1 starts at offset bytesPerRow, not at offset (width*4) —
+        // they coincide only when the kernel preserves the requested stride
+        #expect(readBack[bytesPerRow] == 0xBB)
     }
 }

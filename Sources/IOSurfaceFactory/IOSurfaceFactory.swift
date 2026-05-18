@@ -21,6 +21,14 @@ extension IOSurfaceFactory {
     /// from `width * bytesPerElement` for aligned formats) and `IOSurface`
     /// won't infer it. `bytes.count` must be at least `bytesPerRow *
     /// height`; extra bytes are ignored.
+    ///
+    /// Dimension inputs are validated:
+    /// - All of `width`, `height`, `bytesPerElement`, `bytesPerRow`
+    ///   must be non-negative.
+    /// - `bytesPerRow * height` (the source allocation size) must not
+    ///   overflow `Int`. `Int.multipliedReportingOverflow(by:)` catches
+    ///   the wrap; otherwise the allocation guard could pass for huge
+    ///   inputs and trap inside CoreFoundation.
     public static func make(
         width: Int,
         height: Int,
@@ -29,7 +37,11 @@ extension IOSurfaceFactory {
         bytesPerRow: Int,
         bytes: Data
     ) throws -> IOSurface {
-        let allocSize = bytesPerRow * height
+        try validateNonNegative(width: width, height: height, bytesPerElement: bytesPerElement, bytesPerRow: bytesPerRow)
+        let (allocSize, overflowed) = bytesPerRow.multipliedReportingOverflow(by: height)
+        guard !overflowed else {
+            throw IOSurfaceFactoryError.allocSizeOverflow(bytesPerRow: bytesPerRow, height: height)
+        }
         guard bytes.count >= allocSize else {
             throw IOSurfaceFactoryError.bytesTooShort(have: bytes.count, need: allocSize)
         }
@@ -44,32 +56,46 @@ extension IOSurfaceFactory {
         guard let surface = Self.allocateSurface(properties: properties) else {
             throw IOSurfaceFactoryError.allocationFailed
         }
-        try writeBytes(bytes, into: surface, count: allocSize)
+        try writeBytes(bytes, into: surface, requestedBytesPerRow: bytesPerRow, height: height)
         return surface
     }
 
     /// BGRA 8-bit-per-channel convenience: `bytesPerElement = 4`,
     /// `bytesPerRow = width * 4`, `pixelFormat =
     /// kCVPixelFormatType_32BGRA`.
+    ///
+    /// `width * 4` is computed with overflow checking — callers that
+    /// pass an absurd `width` get
+    /// `IOSurfaceFactoryError.bytesPerRowOverflow` instead of an
+    /// arithmetic trap.
     public static func makeBGRA(width: Int, height: Int, bytes: Data) throws -> IOSurface {
-        try make(
+        let (bytesPerRow, overflowed) = width.multipliedReportingOverflow(by: 4)
+        guard !overflowed else {
+            throw IOSurfaceFactoryError.bytesPerRowOverflow(width: width, bytesPerElement: 4)
+        }
+        return try make(
             width: width,
             height: height,
             pixelFormat: 0x42475241, // 'BGRA' — kCVPixelFormatType_32BGRA without importing CoreVideo
             bytesPerElement: 4,
-            bytesPerRow: width * 4,
+            bytesPerRow: bytesPerRow,
             bytes: bytes
         )
     }
 
     /// Read the entire backing buffer of `surface` as `Data`.
     ///
-    /// Acquires a read lock for the duration of the copy. The returned
+    /// Acquires a read lock for the duration of the copy; throws
+    /// `IOSurfaceFactoryError.lockFailed` if the kernel refuses the lock
+    /// rather than returning potentially-undefined memory. The returned
     /// `Data` is an independent heap copy; subsequent mutations of the
     /// surface do not affect it.
-    public static func readBytes(_ surface: IOSurface) -> Data {
+    public static func readBytes(_ surface: IOSurface) throws -> Data {
         var seed: UInt32 = 0
-        _ = surface.lock(options: .readOnly, seed: &seed)
+        let lockResult = surface.lock(options: .readOnly, seed: &seed)
+        guard lockResult == kIOReturnSuccess else {
+            throw IOSurfaceFactoryError.lockFailed(code: Int(lockResult))
+        }
         defer { _ = surface.unlock(options: .readOnly, seed: &seed) }
         return Data(bytes: surface.baseAddress, count: surface.allocationSize)
     }
@@ -89,16 +115,48 @@ private extension IOSurfaceFactory {
         return ref as IOSurface
     }
 
-    static func writeBytes(_ bytes: Data, into surface: IOSurface, count: Int) throws {
+    /// Copy `bytes` into `surface` row-by-row, honouring the surface's
+    /// *resolved* `bytesPerRow` (which `IOSurface` may round up for GPU
+    /// alignment) rather than the value the caller requested. A naive
+    /// contiguous `memcpy` would corrupt rows 1..height-1 whenever the
+    /// resolved stride exceeds the requested one because each row would
+    /// land partly inside the previous row's stride padding.
+    static func writeBytes(
+        _ bytes: Data,
+        into surface: IOSurface,
+        requestedBytesPerRow: Int,
+        height: Int
+    ) throws {
         var seed: UInt32 = 0
         let lockResult = surface.lock(options: [], seed: &seed)
         guard lockResult == kIOReturnSuccess else {
             throw IOSurfaceFactoryError.lockFailed(code: Int(lockResult))
         }
         defer { _ = surface.unlock(options: [], seed: &seed) }
+        let dstStride = surface.bytesPerRow
+        let rowBytes = min(requestedBytesPerRow, dstStride)
         bytes.withUnsafeBytes { raw in
             guard let src = raw.baseAddress else { return }
-            memcpy(surface.baseAddress, src, count)
+            (0..<height).forEach { row in
+                let dst = surface.baseAddress.advanced(by: row * dstStride)
+                memcpy(dst, src.advanced(by: row * requestedBytesPerRow), rowBytes)
+            }
+        }
+    }
+
+    static func validateNonNegative(
+        width: Int,
+        height: Int,
+        bytesPerElement: Int,
+        bytesPerRow: Int
+    ) throws {
+        guard width >= 0, height >= 0, bytesPerElement >= 0, bytesPerRow >= 0 else {
+            throw IOSurfaceFactoryError.negativeDimension(
+                width: width,
+                height: height,
+                bytesPerElement: bytesPerElement,
+                bytesPerRow: bytesPerRow
+            )
         }
     }
 }
@@ -107,6 +165,9 @@ public enum IOSurfaceFactoryError: Error, Sendable, Equatable {
     case allocationFailed
     case bytesTooShort(have: Int, need: Int)
     case lockFailed(code: Int)
+    case allocSizeOverflow(bytesPerRow: Int, height: Int)
+    case bytesPerRowOverflow(width: Int, bytesPerElement: Int)
+    case negativeDimension(width: Int, height: Int, bytesPerElement: Int, bytesPerRow: Int)
 }
 
 extension IOSurfaceFactory {
