@@ -45,10 +45,11 @@ jobs:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       # workflow_dispatch では default ref が選択 branch になり、tag-input と乖離する。
-      # 必ず TAG (= inputs.tag || github.ref_name) を明示 checkout する。
+      # 必ず TAG を `refs/tags/` qualified で明示 checkout する ― 同名 branch があっても
+      # tag が選ばれることを保証する。
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
 
       - name: Validate tag shape and required secrets
         env:
@@ -59,11 +60,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          # SemVer + optional pre-release / build metadata。filesystem-safe.
-          # OK: v0.1.0, v1.2.3-rc.1, v1.0.0+build.42, v0.0.0-test1
-          # NG: v1.0/rc1, v0.1.0 with space, /, etc.
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::TAG '$TAG' does not match SemVer shape v<major>.<minor>.<patch>[-prerelease][+build]"
+          # SemVer 2.0 ベース: prerelease / build は dot-separated alnum/`-` identifier。
+          # 空 identifier / 連続ドット / 単独ドット で始まる/終わる segment を弾く。
+          # OK: v0.1.0, v1.2.3-rc.1, v1.0.0+build.42, v0.0.0-test1, v1.2.3-rc.1+sha.abc
+          # NG: v1.0/rc1, v0.1..0, v1.0.0-, v1.0.0-.foo, v1.0.0+, v1.0.0-.+.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?$ ]]; then
+            echo "::error::TAG '$TAG' does not match SemVer 2.0 shape v<major>.<minor>.<patch>[-prerelease][+build]"
             exit 1
           fi
           missing=()
@@ -96,6 +98,10 @@ jobs:
           trap 'rm -f "$CERT_PATH"' EXIT
           echo "$MACOS_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # create-keychain が success した時点で cleanup step が見つけられるよう
+          # 後続 (set-keychain-settings / import / list-keychains 等) が失敗しても
+          # KEYCHAIN_PATH は GITHUB_ENV に書き出しておく。
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # -t agg ― .p12 は cert + private key の aggregate identity bundle。
@@ -106,7 +112,6 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Archive Decoy.app
         env:
@@ -116,6 +121,9 @@ jobs:
           # project.yml は debug build を ad-hoc ("-") に固定する。release では
           # CODE_SIGN_STYLE=Automatic + DEVELOPMENT_TEAM を inject して Xcode に
           # keychain 内の Developer ID Application identity を resolve させる。
+          # TODO(#76): SystemExtension が要求する制約付き entitlement のため、
+          # 初回 v* tag push で archive が profile 不足で落ちる可能性が高い。
+          # Developer ID provisioning profile import + manual signing への切替を別 PR で追加。
           xcodebuild archive \
             -project Decoy.xcodeproj \
             -scheme Decoy \
@@ -201,7 +209,15 @@ jobs:
         run: |
           # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
           # (workflow_dispatch で typo した tag が draft release を勝手に新規作成する事故を防ぐ)。
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 既存 release が published 済 (draft でない) なら、public asset を
+            # silently 上書きするのは事故のもと ― 明示削除を要求する。
+            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+              exit 1
+            fi
+          else
             gh release create "$TAG" \
               --title "$TAG" \
               --generate-notes \
