@@ -26,10 +26,16 @@ struct FileSystemClipStoreTests {
     }
 
     private func makeFrames(count: Int, payloadBase: UInt8 = 0) -> [Frame] {
+        // 2×2 BGRA = 16 bytes per frame, content varied by index so each
+        // frame's bytes round-trip distinctly through the on-disk format.
         (0..<count).map { i in
-            Frame(
+            let bytes = Data((0..<16).map { UInt8(($0 + i + Int(payloadBase)) & 0xFF) })
+            return Frame(
                 presentationTime: TimeInterval(i) * 0.033,
-                data: Data((0..<16).map { UInt8(($0 + i + Int(payloadBase)) & 0xFF) })
+                pixelData: bytes,
+                width: 2, height: 2,
+                pixelFormat: 0x42475241, // 'BGRA'
+                bytesPerRow: 8
             )
         }
     }
@@ -135,10 +141,19 @@ struct FileSystemClipStoreTests {
     @Test func largeClip_roundtripsBitExact() async throws {
         let tmp = Self.makeTempRoot()
         let store = FileSystemClipStore(rootURL: tmp.url)
+        // 32×64 BGRA = 8 KiB per frame, content varying by index.
+        let width = 32
+        let height = 64
+        let bytesPerFrame = width * height * 4
         let frames: [Frame] = (0..<256).map { i in
-            // 8 KiB per frame, content varying by index
-            let bytes = (0..<8_192).map { byte in UInt8((byte ^ i) & 0xFF) }
-            return Frame(presentationTime: TimeInterval(i) * 0.04, data: Data(bytes))
+            let bytes = Data((0..<bytesPerFrame).map { byte in UInt8((byte ^ i) & 0xFF) })
+            return Frame(
+                presentationTime: TimeInterval(i) * 0.04,
+                pixelData: bytes,
+                width: width, height: height,
+                pixelFormat: 0x42475241, // 'BGRA'
+                bytesPerRow: width * 4
+            )
         }
         let c = makeClip(frames: frames, duration: TimeInterval(frames.count) * 0.04)
         try await store.save(c)
@@ -220,6 +235,43 @@ struct FileSystemClipStoreTests {
         let c = makeClip(frames: makeFrames(count: 1))
         await #expect(throws: FileSystemClipStoreError.notADirectory(collidingRoot)) {
             try await store.save(c)
+        }
+    }
+
+    // MARK: - Corrupted metadata — surfaces as invalidMetadata, not a trap
+
+    @Test func clip_invalidPixelFormat_throwsInvalidMetadata() async throws {
+        let tmp = Self.makeTempRoot()
+        let store = FileSystemClipStore(rootURL: tmp.url)
+        let c = makeClip(frames: makeFrames(count: 1))
+        try await store.save(c)
+        // Rewrite metadata.json with pixelFormat = -1 (out of UInt32 range).
+        let clipDir = tmp.url.appendingPathComponent(c.id.uuidString, isDirectory: true)
+        let metadataURL = clipDir.appendingPathComponent("metadata.json")
+        let raw = try Data(contentsOf: metadataURL)
+        let mutated = String(data: raw, encoding: .utf8)?
+            .replacingOccurrences(of: "\"pixelFormat\":1111970369", with: "\"pixelFormat\":-1")
+        let mutatedData = try #require(mutated?.data(using: .utf8))
+        try mutatedData.write(to: metadataURL)
+        await #expect(throws: FileSystemClipStoreError.self) {
+            _ = try await store.clip(id: c.id)
+        }
+    }
+
+    @Test func clip_negativeDimension_throwsInvalidMetadata() async throws {
+        let tmp = Self.makeTempRoot()
+        let store = FileSystemClipStore(rootURL: tmp.url)
+        let c = makeClip(frames: makeFrames(count: 1))
+        try await store.save(c)
+        let clipDir = tmp.url.appendingPathComponent(c.id.uuidString, isDirectory: true)
+        let metadataURL = clipDir.appendingPathComponent("metadata.json")
+        let raw = try Data(contentsOf: metadataURL)
+        let mutated = String(data: raw, encoding: .utf8)?
+            .replacingOccurrences(of: "\"width\":2", with: "\"width\":-2")
+        let mutatedData = try #require(mutated?.data(using: .utf8))
+        try mutatedData.write(to: metadataURL)
+        await #expect(throws: FileSystemClipStoreError.self) {
+            _ = try await store.clip(id: c.id)
         }
     }
 

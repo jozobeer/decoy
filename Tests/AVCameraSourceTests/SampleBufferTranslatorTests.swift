@@ -7,21 +7,16 @@ import Domain
 
 @Suite("SampleBufferTranslator")
 struct SampleBufferTranslatorTests {
-    /// Build a synthetic NV12 (`420YpCbCr8BiPlanarVideoRange`) CMSampleBuffer
-    /// from a Y plane and a CbCr plane.
+    /// Build a synthetic BGRA `CMSampleBuffer` carrying an IOSurface-backed
+    /// `CVPixelBuffer`. The translator's contract is "extract the
+    /// IOSurface and presentation time" — it does not transform pixel
+    /// content — so fixtures only need to be IOSurface-backed.
     private func makeSampleBuffer(
         width: Int,
         height: Int,
-        yBytes: [UInt8],
-        cbCrBytes: [UInt8],
         presentationSeconds: Double
     ) throws -> CMSampleBuffer {
-        let pixelBuffer = try makePixelBuffer(
-            width: width,
-            height: height,
-            yBytes: yBytes,
-            cbCrBytes: cbCrBytes
-        )
+        let pixelBuffer = try makePixelBuffer(width: width, height: height)
         let pts = CMTime(seconds: presentationSeconds, preferredTimescale: 1_000_000)
         var formatDesc: CMVideoFormatDescription?
         let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(
@@ -51,12 +46,7 @@ struct SampleBufferTranslatorTests {
         return sampleBuffer
     }
 
-    private func makePixelBuffer(
-        width: Int,
-        height: Int,
-        yBytes: [UInt8],
-        cbCrBytes: [UInt8]
-    ) throws -> CVPixelBuffer {
+    private func makePixelBuffer(width: Int, height: Int) throws -> CVPixelBuffer {
         var pixelBuffer: CVPixelBuffer?
         let attrs: CFDictionary = [
             kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
@@ -65,61 +55,20 @@ struct SampleBufferTranslatorTests {
             kCFAllocatorDefault,
             width,
             height,
-            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelFormatType_32BGRA,
             attrs,
             &pixelBuffer
         )
         guard status == kCVReturnSuccess, let pixelBuffer else {
             throw TestError.pixelBufferCreationFailed(status)
         }
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-        try writePlane(
-            pixelBuffer: pixelBuffer,
-            planeIndex: 0,
-            bytes: yBytes,
-            expectedRows: height
-        )
-        try writePlane(
-            pixelBuffer: pixelBuffer,
-            planeIndex: 1,
-            bytes: cbCrBytes,
-            expectedRows: height / 2
-        )
         return pixelBuffer
-    }
-
-    private func writePlane(
-        pixelBuffer: CVPixelBuffer,
-        planeIndex: Int,
-        bytes: [UInt8],
-        expectedRows: Int
-    ) throws {
-        guard let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex) else {
-            throw TestError.planeBaseAddressMissing(planeIndex)
-        }
-        let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex)
-        let widthBytes = CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex)
-            * (planeIndex == 0 ? 1 : 2) // CbCr is interleaved 2 bytes per chroma sample
-        // initialize the entire allocation to a known value so unwritten
-        // padding is deterministic
-        memset(base, 0, rowBytes * expectedRows)
-        bytes.withUnsafeBufferPointer { src in
-            (0..<expectedRows).forEach { row in
-                let rowSrcOffset = row * widthBytes
-                guard rowSrcOffset < src.count else { return }
-                let bytesToCopy = min(widthBytes, src.count - rowSrcOffset)
-                let dst = base.advanced(by: row * rowBytes)
-                memcpy(dst, src.baseAddress?.advanced(by: rowSrcOffset), bytesToCopy)
-            }
-        }
     }
 
     enum TestError: Error {
         case pixelBufferCreationFailed(CVReturn)
         case sampleBufferCreationFailed(OSStatus)
         case formatDescriptionCreationFailed(OSStatus)
-        case planeBaseAddressMissing(Int)
     }
 
     @Test("frame(from:) returns nil when sample buffer carries no image buffer")
@@ -148,34 +97,19 @@ struct SampleBufferTranslatorTests {
     @Test("frame(from:) preserves presentation time in seconds")
     func translatorPreservesPresentationTime() throws {
         let pts = 1.5
-        let buffer = try makeSampleBuffer(
-            width: 2,
-            height: 2,
-            yBytes: [0, 0, 0, 0],
-            cbCrBytes: [0, 0],
-            presentationSeconds: pts
-        )
+        let buffer = try makeSampleBuffer(width: 4, height: 4, presentationSeconds: pts)
         let translated = frame(from: buffer)
         #expect(translated != nil)
         #expect(abs((translated?.presentationTime ?? 0) - pts) < 0.0001)
     }
 
-    @Test("frame(from:) concatenates Y plane followed by CbCr plane bytes")
-    func translatorConcatenatesPlanes() throws {
-        // 2x2 image: Y plane = 4 bytes, CbCr plane = 2 bytes (one pair)
-        let y: [UInt8] = [0x11, 0x22, 0x33, 0x44]
-        let cbcr: [UInt8] = [0x55, 0x66]
-        let buffer = try makeSampleBuffer(
-            width: 2,
-            height: 2,
-            yBytes: y,
-            cbCrBytes: cbcr,
-            presentationSeconds: 0
-        )
-        let translated = frame(from: buffer)
-        #expect(translated != nil)
-        // expected layout: Y bytes, then CbCr bytes
-        let expected = Data(y + cbcr)
-        #expect(translated?.data == expected)
+    @Test("frame(from:) extracts pixel data + dims + format from the CVPixelBuffer")
+    func translatorExtractsPixelMetadata() throws {
+        let buffer = try makeSampleBuffer(width: 8, height: 4, presentationSeconds: 0)
+        let translated = try #require(frame(from: buffer))
+        #expect(translated.width == 8)
+        #expect(translated.height == 4)
+        #expect(translated.pixelFormat == kCVPixelFormatType_32BGRA)
+        #expect(translated.pixelData.count == translated.bytesPerRow * translated.height)
     }
 }

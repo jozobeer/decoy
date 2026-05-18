@@ -12,7 +12,7 @@ import InMemoryVirtualCameraSink
 struct BroadcasterTests {
     // MARK: - Construction
 
-    @Test func defaultInit_isLive() async {
+    @Test func defaultInit_isLive() async throws {
         await withStubDeps {
             let broadcaster = BroadcasterUseCaseImpl()
             #expect(await broadcaster.state == .live)
@@ -93,7 +93,7 @@ struct BroadcasterTests {
         }
     }
 
-    @Test func returnToLive_whenAlreadyLive_isNoOp() async {
+    @Test func returnToLive_whenAlreadyLive_isNoOp() async throws {
         await withStubDeps {
             let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.returnToLive)
@@ -103,7 +103,7 @@ struct BroadcasterTests {
 
     // MARK: - Same-dim Last-Write-Wins
 
-    @Test func startDecoy_chain_lastModeWins() async {
+    @Test func startDecoy_chain_lastModeWins() async throws {
         await withStubDeps {
             let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.startDecoy(.once))
@@ -113,7 +113,7 @@ struct BroadcasterTests {
         }
     }
 
-    @Test func startDecoy_then_returnToLive_endsAtLive() async {
+    @Test func startDecoy_then_returnToLive_endsAtLive() async throws {
         await withStubDeps {
             let broadcaster = BroadcasterUseCaseImpl(state: .live)
             await broadcaster.handle(.startDecoy(.loop))

@@ -5,8 +5,14 @@ import Domain
 
 @Suite("InMemoryVirtualCameraSink")
 struct InMemoryVirtualCameraSinkTests {
-    private func makeFrame(t: TimeInterval = 0, label: String = "") -> Frame {
-        Frame(presentationTime: t, data: Data(label.utf8))
+    private func makeFrame(t: TimeInterval = 0, payload: UInt8 = 0) -> Frame {
+        Frame(
+            presentationTime: t,
+            pixelData: Data(repeating: payload, count: 64),
+            width: 4, height: 4,
+            pixelFormat: 0x42475241, // 'BGRA'
+            bytesPerRow: 16
+        )
     }
 
     @Test func emptyInit_framesIsEmpty() async {
@@ -17,7 +23,7 @@ struct InMemoryVirtualCameraSinkTests {
 
     @Test func send_oneFrame_framesContainsThatFrame() async throws {
         let sink = InMemoryVirtualCameraSink()
-        let f = makeFrame(t: 1, label: "a")
+        let f = makeFrame(t: 1, payload: 0xA1)
         try await sink.send(f)
         let frames = await sink.frames
         #expect(frames == [f])
@@ -25,9 +31,9 @@ struct InMemoryVirtualCameraSinkTests {
 
     @Test func send_multipleFrames_preservesOrder() async throws {
         let sink = InMemoryVirtualCameraSink()
-        let f1 = makeFrame(t: 1, label: "a")
-        let f2 = makeFrame(t: 2, label: "b")
-        let f3 = makeFrame(t: 3, label: "c")
+        let f1 = makeFrame(t: 1, payload: 0xA1)
+        let f2 = makeFrame(t: 2, payload: 0xB2)
+        let f3 = makeFrame(t: 3, payload: 0xC3)
         try await sink.send(f1)
         try await sink.send(f2)
         try await sink.send(f3)
@@ -37,7 +43,7 @@ struct InMemoryVirtualCameraSinkTests {
 
     @Test func send_sameFrameTwice_appendsBothCopies() async throws {
         let sink = InMemoryVirtualCameraSink()
-        let f = makeFrame(t: 1, label: "a")
+        let f = makeFrame(t: 1, payload: 0xA1)
         try await sink.send(f)
         try await sink.send(f)
         let frames = await sink.frames

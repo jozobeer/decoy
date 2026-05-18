@@ -18,7 +18,7 @@ struct BroadcasterEventsTests {
     private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     private static func frame(_ pts: TimeInterval, _ byte: UInt8 = 0xAB) -> Frame {
-        Frame(presentationTime: pts, data: Data([byte]))
+        Frame(presentationTime: pts, pixelData: Data(repeating: byte, count: 64), width: 4, height: 4, pixelFormat: 0x42475241, bytesPerRow: 16)
     }
 
     private static func clip(frames: [Frame]) -> Clip {
@@ -79,7 +79,7 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func liveMode_multipleFrameFailures_emitMultipleSendFailedInOrder() async throws {
+    @Test func liveMode_multipleFrameFailures_emitMultipleSendFailedInOrder() async {
         // Live source emits 3 frames sequentially; sink throws on each.
         // Each failure must surface as its own event — routing must NOT
         // bail on the first error.
@@ -87,7 +87,7 @@ struct BroadcasterEventsTests {
         let source = InMemoryCameraSource(emitting: frames)
         let sink = FailingVirtualCameraSink(error: TestError(label: "burst"))
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = sink
@@ -113,7 +113,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = FailingVirtualCameraSink(error: TestError(label: "playback sink down"))
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -139,7 +139,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = FailingVirtualCameraSink(error: TestError(label: "mode=\(mode)"))
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -159,11 +159,11 @@ struct BroadcasterEventsTests {
 
     // MARK: - .storeReadFailed (Playback only)
 
-    @Test func playbackInit_whenStoreReadThrows_emitsStoreReadFailedOnce() async throws {
+    @Test func playbackInit_whenStoreReadThrows_emitsStoreReadFailedOnce() async {
         let store = FailingClipStore(onAll: TestError(label: "store corrupt"))
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -204,7 +204,7 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func storeReadFailure_routingTerminates_subsequentStartDecoyRetries() async throws {
+    @Test func storeReadFailure_routingTerminates_subsequentStartDecoyRetries() async {
         // After a .storeReadFailed, routing exits naturally (no clip
         // to play). The same-mode-after-dead-routing replay path
         // (added in bad3ced) must trigger another store read, which
@@ -212,7 +212,7 @@ struct BroadcasterEventsTests {
         let store = FailingClipStore(onAll: TestError(label: "again"))
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -237,14 +237,14 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func liveMode_withFailingClipStore_emitsNoStoreReadFailed() async throws {
+    @Test func liveMode_withFailingClipStore_emitsNoStoreReadFailed() async {
         // Live mode never reads the store, so a failing store must
         // emit no .storeReadFailed.
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let store = FailingClipStore(onAll: TestError(label: "unused"))
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -264,7 +264,7 @@ struct BroadcasterEventsTests {
 
     // MARK: - Cancellation suppression
 
-    @Test func liveMode_sinkThrowsCancellationError_emitsNoSendFailed() async throws {
+    @Test func liveMode_sinkThrowsCancellationError_emitsNoSendFailed() async {
         // sink.send may throw CancellationError when the routing task is
         // cancelled mid-flight (shutdown / state transition). This is
         // not a real failure — surfacing it as .sendFailed would be
@@ -272,7 +272,7 @@ struct BroadcasterEventsTests {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0, 0xAA)])
         let sink = FailingVirtualCameraSink(error: CancellationError())
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = sink
@@ -291,7 +291,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = FailingVirtualCameraSink(error: CancellationError())
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -305,7 +305,7 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func shutdownBeforeInitialRouting_emitsNoEvents() async throws {
+    @Test func shutdownBeforeInitialRouting_emitsNoEvents() async {
         // init defers `startRouting()` via a `Task { await self?... }`
         // hop so the emit closure can capture fully-initialized self.
         // A caller that does `BroadcasterUseCaseImpl() → await shutdown()` rapidly
@@ -317,7 +317,7 @@ struct BroadcasterEventsTests {
         let sink = FailingVirtualCameraSink(error: TestError(label: "race"))
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = sink
@@ -338,7 +338,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = FailingVirtualCameraSink(error: TestError(label: "post-shutdown"))
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -354,13 +354,13 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func playbackMode_storeThrowsCancellationError_emitsNoStoreReadFailed() async throws {
+    @Test func playbackMode_storeThrowsCancellationError_emitsNoStoreReadFailed() async {
         // CancellationError on store.all() during playback init must be
         // suppressed — same rationale as sink cancellation.
         let store = FailingClipStore(onAll: CancellationError())
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -376,11 +376,11 @@ struct BroadcasterEventsTests {
 
     // MARK: - No-event scenarios
 
-    @Test func liveMode_withSuccessfulSink_emitsNoEvents() async throws {
+    @Test func liveMode_withSuccessfulSink_emitsNoEvents() async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0, 0xAA)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = sink
@@ -399,7 +399,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -413,14 +413,14 @@ struct BroadcasterEventsTests {
         }
     }
 
-    @Test func playbackMode_withEmptyStore_emitsNoEvents() async throws {
+    @Test func playbackMode_withEmptyStore_emitsNoEvents() async {
         // Empty store is distinct from a failing store: the existing
         // "silent no-op" behavior must be preserved — no
         // .storeReadFailed for empty.
         let store = InMemoryClipStore()
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = InMemoryCameraSource(emitting: [])
             $0.clipStore = store
             $0.virtualCameraSink = sink
@@ -435,11 +435,11 @@ struct BroadcasterEventsTests {
     }
 
     @Test(arguments: [AppCommand.startRecording, .stopRecording])
-    func recordingCommand_emitsNoBroadcasterEvent(foreign: AppCommand) async throws {
+    func recordingCommand_emitsNoBroadcasterEvent(foreign: AppCommand) async {
         let source = InMemoryCameraSource(emitting: [Self.frame(0.0)])
         let sink = InMemoryVirtualCameraSink()
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = source
             $0.clipStore = InMemoryClipStore()
             $0.virtualCameraSink = sink
@@ -579,7 +579,7 @@ struct BroadcasterEventsTests {
         let store = try await Self.seededStore([Self.clip(frames: presets)])
         let sink = FailingVirtualCameraSink(error: TestError(label: "cross-phase"))
 
-        try await withDependencies {
+        await withDependencies {
             $0.cameraSource = liveSource
             $0.clipStore = store
             $0.virtualCameraSink = sink
