@@ -1,5 +1,3 @@
-import Foundation
-
 /// host (`MachPortFrameTransport`) と extension (`MachPortFrameReceiver`)
 /// が握る Mach service name。launchd の bootstrap server を介して
 /// `bootstrap_look_up` (host) と `bootstrap_check_in` (extension) が

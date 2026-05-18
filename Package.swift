@@ -143,7 +143,6 @@ let package = Package(
                 "AVCameraPermission",
                 "SystemExtensionInstaller",
                 "InMemorySystemExtensionInstaller",
-                "InMemoryFrameTransport",
                 "MachPortFrameTransport",
                 "CMIOVirtualCameraSink",
                 "HotkeyService",
