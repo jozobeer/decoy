@@ -282,23 +282,27 @@ struct BroadcasterIntegrationTests {
 
 extension BroadcasterIntegrationTests {
 
-    /// Wait for at least `count` frames to arrive in the sink, then run a
-    /// few extra yield cycles so any surplus arrivals surface in
-    /// assertions. Tasks scheduled across actor boundaries vary in their
-    /// yield-count to settle, so we poll first (up to `maxPolls`) instead
-    /// of relying on a fixed budget. Returns the sink's full frame
-    /// buffer after the settle window.
+    /// Wait for at least `count` frames to arrive in the sink, then run an
+    /// extra `megaYield` so surplus arrivals surface in assertions.
+    /// `Task.megaYield()` matches `ImmediateClock.sleep`'s internal
+    /// scheduling mechanism (20 background-priority detached `Task.yield()`
+    /// calls) — without it, frame-emission tasks scheduled at background
+    /// priority don't get a chance to run between polls. The plain
+    /// `Task.yield()` variant was insufficient on CI (slower scheduling
+    /// under contention) and caused intermittent `count → 0 == 1`
+    /// failures, while the local fast path always passed; this matches
+    /// the proven pattern in `BroadcasterPlaybackTests`.
     private func collectFrames(
         from sink: InMemoryVirtualCameraSink,
         atLeast count: Int
     ) async -> [Frame] {
-        let maxPolls = 100
+        let maxPolls = 200
         for _ in 0..<maxPolls {
             let current = await sink.frames
             if current.count >= count { break }
-            await Task.yield()
+            await Task.megaYield()
         }
-        for _ in 0..<4 { await Task.yield() }
+        await Task.megaYield()
         return await sink.frames
     }
 }
