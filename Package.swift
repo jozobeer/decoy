@@ -23,6 +23,7 @@ let package = Package(
         .library(name: "InMemorySystemExtensionInstaller", targets: ["InMemorySystemExtensionInstaller"]),
         .library(name: "InMemoryFrameTransport", targets: ["InMemoryFrameTransport"]),
         .library(name: "CMIOVirtualCameraSink", targets: ["CMIOVirtualCameraSink"]),
+        .library(name: "IOSurfaceFactory", targets: ["IOSurfaceFactory"]),
         .library(name: "DependencyInjection", targets: ["DependencyInjection"]),
         .library(name: "AppCommandDispatcher", targets: ["AppCommandDispatcher"]),
         .library(name: "HotkeyService", targets: ["HotkeyService"]),
@@ -107,6 +108,7 @@ let package = Package(
         .target(name: "InMemorySystemExtensionInstaller", dependencies: ["Domain"]),
         .target(name: "InMemoryFrameTransport", dependencies: ["Domain"]),
         .target(name: "CMIOVirtualCameraSink", dependencies: ["Domain"]),
+        .target(name: "IOSurfaceFactory"),
         .target(
             name: "HotkeyService",
             dependencies: [
@@ -190,6 +192,7 @@ let package = Package(
         .testTarget(name: "SystemExtensionInstallerTests", dependencies: ["SystemExtensionInstaller", "Domain"]),
         .testTarget(name: "InMemoryFrameTransportTests", dependencies: ["InMemoryFrameTransport", "Domain"]),
         .testTarget(name: "CMIOVirtualCameraSinkTests", dependencies: ["CMIOVirtualCameraSink", "InMemoryFrameTransport", "Domain"]),
+        .testTarget(name: "IOSurfaceFactoryTests", dependencies: ["IOSurfaceFactory"]),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
             name: "MenuBarUITests",
