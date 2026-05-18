@@ -16,15 +16,20 @@ name: Release
 # Settings → Environments → release → Deployment branches and tags:
 #   "Selected branches and tags" を選び、`Ref type: Tag` + `Name pattern: v*` のみ許可。
 #   GitHub の deployment protection rule は `refs/tags/` プレフィックス無しの
-#   bare な branch/tag 名 pattern を取るので、`v*` (or 厳密化したい場合は
-#   `v[0-9]*.[0-9]*.[0-9]*`) を使うこと ― `refs/tags/v*` だと一切 match しない。
+#   bare な tag 名 glob pattern を取るので、`v*` を使うこと ― `refs/tags/v*` だと
+#   一切 match しない。なお GitHub の pattern は glob (not regex) のため、
+#   `v[0-9]*` のような書き方も `[0-9]` 直後の `*` が任意文字列に展開されて
+#   `v1foo.2bar` 等も通すので、SemVer 厳密マッチは glob では不可能。
+#   厳密性は本 workflow 内の SemVer regex validation step で担保する。
 #   この設定により workflow_dispatch で branch ref を選んでも secrets が解放されず、
 #   secret 漏洩経路を tag-triggered run だけに絞れる。
 #
 # Security note:
-# - 外部入力 (PR title / body / commit message 等) を一切 shell に渡さない
-# - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照
-# - tag 名は SemVer 厳密 regex で validate して filesystem 安全性を担保
+# - 外部入力で本 workflow が受け取るのは TAG (push tag or workflow_dispatch input) のみ。
+#   PR title / body / commit message 等は一切参照しない (command injection 面なし)。
+# - TAG は SemVer 厳密 regex で validate してから shell に展開する。validation 前の
+#   shell 露出は無く、filesystem 安全性と shell-special 文字の不在を担保する。
+# - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照する。
 
 on:
   push:
@@ -70,14 +75,9 @@ jobs:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
-      - name: Validate tag shape and required secrets
-        env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      # validation を 2 step に分離 ― defense-in-depth として、malformed TAG が万一
+      # 弾けた場合でも shell に secrets が露出しないよう、shape check は secret-free 化。
+      - name: Validate tag shape
         run: |
           # SemVer 2.0 ベース: major.minor.patch は leading zero を禁止 (0 か 1-9 で始まる)。
           # prerelease / build は dot-separated alnum/`-` identifier。空 identifier 不可。
@@ -87,6 +87,36 @@ jobs:
             echo "::error::TAG '$TAG' does not match SemVer 2.0 shape v<major>.<minor>.<patch>[-prerelease][+build]"
             exit 1
           fi
+
+      # workflow_dispatch では UI で選択した ref に対して GitHub Environment の deployment
+      # protection が照合される。inputs.tag が github.ref_name と乖離すると、ref A で
+      # 環境 approval を取って ref B の artifact を build / upload する経路ができてしまう。
+      # 両者の一致を必須化することで approval と artifact 出所の整合性を担保する。
+      - name: Verify workflow_dispatch ref matches inputs.tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          DISPATCH_REF_TYPE: ${{ github.ref_type }}
+          DISPATCH_REF_NAME: ${{ github.ref_name }}
+          DISPATCH_TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ "$DISPATCH_REF_TYPE" != "tag" ]; then
+            echo "::error::workflow_dispatch must be started from a tag ref (got: $DISPATCH_REF_TYPE)"
+            exit 1
+          fi
+          if [ "$DISPATCH_REF_NAME" != "$DISPATCH_TAG_INPUT" ]; then
+            echo "::error::ref/$DISPATCH_REF_NAME does not match inputs.tag=$DISPATCH_TAG_INPUT"
+            exit 1
+          fi
+
+      - name: Verify required secrets
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
           missing=()
           [ -z "$MACOS_CERTIFICATE_P12" ] && missing+=(MACOS_CERTIFICATE_P12)
           [ -z "$MACOS_CERTIFICATE_PASSWORD" ] && missing+=(MACOS_CERTIFICATE_PASSWORD)
@@ -278,10 +308,11 @@ jobs:
           # prerelease 判定: build metadata (`+segment`) 内の hyphen は prerelease ではないので
           # 先に `+` 以降を切り落としてから `-` の有無を見る。
           # 例: v1.0.0+build-foo は prerelease=false, v1.2.3-rc.1+sha は prerelease=true。
-          PRERELEASE_FLAG=()
           TAG_NO_BUILD="${TAG%%+*}"
           if [[ "$TAG_NO_BUILD" == *-* ]]; then
-            PRERELEASE_FLAG=(--prerelease)
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
           fi
           # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
           # (workflow_dispatch で typo した tag が draft release を勝手に新規作成する事故を防ぐ)。
@@ -293,7 +324,19 @@ jobs:
               echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
               exit 1
             fi
+            # 既存 draft の isPrerelease が TAG 形状と乖離している可能性 (古い workflow の残骸 /
+            # 手動作成 draft 等)。後段で publish したとき RC が正規 release として表に出る事故を
+            # 防ぐため、TAG 形状ベースの値で update する。
+            # gh release edit の `--prerelease=false` 構文は gh CLI version 依存で
+            # brittle なので、REST API で確実に PATCH する。
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" --jq .id)
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
+              -F prerelease="$IS_PRERELEASE" >/dev/null
           else
+            PRERELEASE_FLAG=()
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              PRERELEASE_FLAG=(--prerelease)
+            fi
             gh release create "$TAG" \
               --title "$TAG" \
               --generate-notes \
