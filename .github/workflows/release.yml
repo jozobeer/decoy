@@ -86,6 +86,23 @@ jobs:
       - name: Generate Decoy.xcodeproj
         run: xcodegen generate
 
+      - name: Inject version into Info.plist
+        run: |
+          # CFBundleShortVersionString は SemVer 数値部 (x.y.z) のみ ― Apple の仕様で
+          # prerelease/build suffix を含めると notarize / store でリジェクトされ得る。
+          # GitHub run number を CFBundleVersion (build number) に monotonic 注入。
+          # source plist は SPM 経由の `swift run` 用に literal を保持し、release では
+          # ここで PlistBuddy で上書きする ($(MARKETING_VERSION) placeholder は
+          # Package.swift の `-sectcreate __TEXT __info_plist` で展開されないため避ける)。
+          CORE_VERSION="${TAG#v}"
+          CORE_VERSION="${CORE_VERSION%%-*}"
+          CORE_VERSION="${CORE_VERSION%%+*}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
+          for plist in Sources/Decoy/Info.plist Apps/DecoyCameraExtension/Info.plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $CORE_VERSION" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$plist"
+          done
+
       - name: Import signing certificate into temporary keychain
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
@@ -118,11 +135,7 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
         run: |
           ARCHIVE_PATH="$RUNNER_TEMP/Decoy.xcarchive"
-          # MARKETING_VERSION ― TAG の `v` prefix を剥がして CFBundleShortVersionString に注入。
-          # CURRENT_PROJECT_VERSION ― github.run_number で build 番号を monotonic に。
-          # Info.plist は $(MARKETING_VERSION) / $(CURRENT_PROJECT_VERSION) placeholder を持つ。
-          MARKETING_VERSION="${TAG#v}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
+          # version 注入は前段の "Inject version into Info.plist" で完了済。
           # project.yml は debug build を ad-hoc ("-") に固定する。release では
           # CODE_SIGN_STYLE=Automatic + DEVELOPMENT_TEAM を inject して Xcode に
           # keychain 内の Developer ID Application identity を resolve させる。
@@ -136,9 +149,7 @@ jobs:
             -destination 'generic/platform=macOS' \
             -archivePath "$ARCHIVE_PATH" \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \
-            MARKETING_VERSION="$MARKETING_VERSION" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM"
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
       - name: Export signed .app from archive
@@ -214,11 +225,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # prerelease 判定: TAG に `-` segment があれば prerelease 扱い (v1.2.3-rc.1 等)。
-          # GitHub Release の prerelease flag を draft 時点で立てておかないと、publish 時に
-          # うっかり stable 扱いで公開される事故が起きる。
+          # prerelease 判定: build metadata (`+segment`) 内の hyphen は prerelease ではないので
+          # 先に `+` 以降を切り落としてから `-` の有無を見る。
+          # 例: v1.0.0+build-foo は prerelease=false, v1.2.3-rc.1+sha は prerelease=true。
           PRERELEASE_FLAG=()
-          if [[ "$TAG" == *-* ]]; then
+          TAG_NO_BUILD="${TAG%%+*}"
+          if [[ "$TAG_NO_BUILD" == *-* ]]; then
             PRERELEASE_FLAG=(--prerelease)
           fi
           # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
