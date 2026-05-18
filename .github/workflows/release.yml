@@ -5,13 +5,18 @@ name: Release
 #   - push tag `v*` (e.g. `v0.1.0`)
 #   - workflow_dispatch (tag input 必須 ― CI 上で再実行する用)
 #
-# Required repo secrets:
+# Required GitHub Environment ― 名前 "release" で作成し、以下 6 secrets を登録:
 #   MACOS_CERTIFICATE_P12           base64-encoded P12 (Developer ID Application)
 #   MACOS_CERTIFICATE_PASSWORD      P12 export password
 #   MACOS_KEYCHAIN_PASSWORD         ephemeral keychain password (任意の文字列でよい)
 #   APPLE_DEVELOPMENT_TEAM          Apple Developer Team ID (10桁)
 #   APPLE_ID                        notarization 用 Apple ID
 #   APPLE_APP_PASSWORD              app-specific password
+#
+# Settings → Environments → release → Deployment branches and tags:
+#   "Selected branches and tags" を選び、Pattern `refs/tags/v*` のみ許可。
+#   こうすれば workflow_dispatch で branch ref を選んでも secrets が解放されず、
+#   secret 漏洩経路を tag-triggered run だけに絞れる。
 #
 # Security note:
 # - 外部入力 (PR title / body / commit message 等) を一切 shell に渡さない
@@ -40,6 +45,10 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    # GitHub Environment 経由で secrets を解放。env 側の deployment branch/tag protection で
+    # `refs/tags/v*` のみ許可することで、workflow_dispatch の branch ref では secrets が
+    # 渡らず Developer ID / notarization の信任が漏れない。
+    environment: release
     timeout-minutes: 60
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -85,6 +94,21 @@ jobs:
             exit 1
           fi
 
+      - name: Abort if release tag is already published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # archive / notarize は数十分 + macOS runner 時間を食う。published 済 release を
+          # 上書きしないという守りは最終 upload step にもあるが、ここで早期 abort することで
+          # 無駄な runner 時間と sign 経路の発火を避ける。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already published. Delete it manually if re-release is intentional."
+              exit 1
+            fi
+          fi
+
       - name: Install xcodegen and create-dmg
         run: brew install xcodegen create-dmg
 
@@ -118,7 +142,9 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
           # P12 file は途中 step が失敗しても必ず消す ― private key の disk 滞留を防ぐ。
           trap 'rm -f "$CERT_PATH"' EXIT
-          echo "$MACOS_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
+          # macOS BSD base64 は GNU 風 `--decode` の互換性が不安定 ― `-D` (BSD) で
+          # decode し、stdout を file redirect で書き出す (`-o` も BSD では非サポート)。
+          echo "$MACOS_CERTIFICATE_P12" | base64 -D > "$CERT_PATH"
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # create-keychain が success した時点で cleanup step が見つけられるよう
           # 後続 (set-keychain-settings / import / list-keychains 等) が失敗しても
