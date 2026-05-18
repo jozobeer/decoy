@@ -16,8 +16,7 @@ name: Release
 # Security note:
 # - 外部入力 (PR title / body / commit message 等) を一切 shell に渡さない
 # - secrets は env: 経由でのみ展開し、heredoc/script では shell var として参照
-# - tag 名は github.ref_name から取るが、`v*` フィルタで形が固定されているため
-#   コマンド注入の余地なし
+# - tag 名は SemVer 厳密 regex で validate して filesystem 安全性を担保
 
 on:
   push:
@@ -29,8 +28,10 @@ on:
         required: true
         type: string
 
+# 同一 tag に対する push と manual dispatch の race を防ぐため、tag 名で group 化。
+# github.ref は manual dispatch では branch を指すため tag-aligned にならない。
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -43,9 +44,13 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      # workflow_dispatch では default ref が選択 branch になり、tag-input と乖離する。
+      # 必ず TAG (= inputs.tag || github.ref_name) を明示 checkout する。
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
-      - name: Validate required secrets
+      - name: Validate tag shape and required secrets
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -54,6 +59,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
+          # SemVer + optional pre-release / build metadata。filesystem-safe.
+          # OK: v0.1.0, v1.2.3-rc.1, v1.0.0+build.42, v0.0.0-test1
+          # NG: v1.0/rc1, v0.1.0 with space, /, etc.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::TAG '$TAG' does not match SemVer shape v<major>.<minor>.<patch>[-prerelease][+build]"
+            exit 1
+          fi
           missing=()
           [ -z "$MACOS_CERTIFICATE_P12" ] && missing+=(MACOS_CERTIFICATE_P12)
           [ -z "$MACOS_CERTIFICATE_PASSWORD" ] && missing+=(MACOS_CERTIFICATE_PASSWORD)
@@ -80,17 +92,20 @@ jobs:
         run: |
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          # P12 file は途中 step が失敗しても必ず消す ― private key の disk 滞留を防ぐ。
+          trap 'rm -f "$CERT_PATH"' EXIT
           echo "$MACOS_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
           security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # -t agg ― .p12 は cert + private key の aggregate identity bundle。
+          # -t cert だと cert のみ取り込まれ codesign が "no identity" で失敗する。
           security import "$CERT_PATH" \
             -P "$MACOS_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+            -A -t agg -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          rm -f "$CERT_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Archive Decoy.app
@@ -98,15 +113,17 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
         run: |
           ARCHIVE_PATH="$RUNNER_TEMP/Decoy.xcarchive"
+          # project.yml は debug build を ad-hoc ("-") に固定する。release では
+          # CODE_SIGN_STYLE=Automatic + DEVELOPMENT_TEAM を inject して Xcode に
+          # keychain 内の Developer ID Application identity を resolve させる。
           xcodebuild archive \
             -project Decoy.xcodeproj \
             -scheme Decoy \
             -configuration Release \
             -destination 'generic/platform=macOS' \
             -archivePath "$ARCHIVE_PATH" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \
-            CODE_SIGN_IDENTITY="Developer ID Application"
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM"
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
       - name: Export signed .app from archive
@@ -115,6 +132,8 @@ jobs:
         run: |
           EXPORT_DIR="$RUNNER_TEMP/export"
           EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
+          # signingStyle=automatic + developer-id method で Xcode が SystemExtension
+          # を含む embedded targets の profile を自動 resolve する。
           cat > "$EXPORT_OPTIONS" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -125,9 +144,7 @@ jobs:
             <key>teamID</key>
             <string>__APPLE_DEVELOPMENT_TEAM__</string>
             <key>signingStyle</key>
-            <string>manual</string>
-            <key>signingCertificate</key>
-            <string>Developer ID Application</string>
+            <string>automatic</string>
           </dict>
           </plist>
           PLIST
@@ -144,6 +161,7 @@ jobs:
 
       - name: Create DMG
         run: |
+          # TAG は SemVer regex で validate 済 ― path injection の余地なし。
           DMG_PATH="$RUNNER_TEMP/Decoy-${TAG}.dmg"
           create-dmg \
             --volname "Decoy ${TAG}" \
@@ -181,18 +199,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # --verify-tag ― tag が repo に存在しなければ release create を失敗させる
+          # (workflow_dispatch で typo した tag が draft release を勝手に新規作成する事故を防ぐ)。
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "$TAG" \
               --generate-notes \
-              --draft
+              --draft \
+              --verify-tag
           fi
           gh release upload "$TAG" "$DMG_PATH" --clobber
 
       - name: Cleanup temporary keychain
         if: always()
-        env:
-          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         run: |
           if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
             security delete-keychain "$KEYCHAIN_PATH" || true
