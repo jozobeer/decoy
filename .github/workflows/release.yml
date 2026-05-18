@@ -47,9 +47,14 @@ jobs:
       # workflow_dispatch では default ref が選択 branch になり、tag-input と乖離する。
       # 必ず TAG を `refs/tags/` qualified で明示 checkout する ― 同名 branch があっても
       # tag が選ばれることを保証する。
+      # persist-credentials: false ― default では git config に GITHUB_TOKEN が
+      # 焼き込まれるが、本 job は contents: write を持ち xcodebuild が build phase /
+      # SPM plugin から token を読める導線がある。release artifact 生成 phase に
+      # token は不要なので明示 OFF する。
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
 
       - name: Validate tag shape and required secrets
         env:
@@ -188,6 +193,10 @@ jobs:
       - name: Create DMG
         run: |
           # TAG は SemVer regex で validate 済 ― path injection の余地なし。
+          # --codesign で DMG container 自体を Developer ID Application で署名する。
+          # 後続の stapler / spctl --context primary-signature は DMG 本体の署名を
+          # 前提とするので、ここで sign しないと notarize ticket が staple できず
+          # spctl assess も "no signature" で落ちる。
           DMG_PATH="$RUNNER_TEMP/Decoy-${TAG}.dmg"
           create-dmg \
             --volname "Decoy ${TAG}" \
@@ -196,6 +205,7 @@ jobs:
             --icon "Decoy.app" 140 190 \
             --app-drop-link 400 190 \
             --no-internet-enable \
+            --codesign "Developer ID Application" \
             "$DMG_PATH" \
             "$EXPORT_DIR"
           [ -f "$DMG_PATH" ] || { echo "::error::DMG not created at $DMG_PATH"; exit 1; }
