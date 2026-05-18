@@ -48,9 +48,11 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
-    # GitHub Environment 経由で secrets を解放。env 側の deployment branch/tag protection で
-    # `refs/tags/v*` のみ許可することで、workflow_dispatch の branch ref では secrets が
-    # 渡らず Developer ID / notarization の信任が漏れない。
+    # GitHub Environment 経由で secrets を解放。env 側の deployment protection で
+    # `Ref type: Tag` + `Name pattern: v*` のみ許可することで、workflow_dispatch の
+    # branch ref では secrets が渡らず Developer ID / notarization の信任が漏れない。
+    # ※ deployment rule は bare な tag 名 pattern を取るので、`refs/tags/` プレフィックスは
+    # 付けないこと (詳細は header コメント参照)。
     environment: release
     timeout-minutes: 60
     env:
