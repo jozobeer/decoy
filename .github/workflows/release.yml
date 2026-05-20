@@ -328,6 +328,7 @@ jobs:
           EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
           # export 時も provisioningProfiles dict を明示し、archive と同じ
           # Developer ID profiles で app / SystemExtension を再署名させる。
+          printf '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>' > "$EXPORT_OPTIONS"
           /usr/libexec/PlistBuddy -c 'Clear dict' "$EXPORT_OPTIONS"
           /usr/libexec/PlistBuddy -c 'Add :method string developer-id' "$EXPORT_OPTIONS"
           /usr/libexec/PlistBuddy -c "Add :teamID string $APPLE_DEVELOPMENT_TEAM" "$EXPORT_OPTIONS"
