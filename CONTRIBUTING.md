@@ -38,6 +38,27 @@ chore/<issue-number>-<short-name>
 
 PR テンプレートは [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)。
 
+## Release Signing
+
+release workflow は `release` GitHub Environment だけで secret を解放する。Environment の deployment rule は `Ref type: Tag` + `Name pattern: v*` に限定する。
+
+必要な secrets:
+
+| Secret | 内容 |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | Developer ID Application certificate + private key の base64-encoded `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | `.p12` export password |
+| `MACOS_KEYCHAIN_PASSWORD` | CI temporary keychain 用 password |
+| `DECOY_APP_PROVISIONING_PROFILE_BASE64` | `beer.jozo.decoy` 用 Developer ID `.provisionprofile` の base64 |
+| `DECOY_CAMERA_EXTENSION_PROVISIONING_PROFILE_BASE64` | `beer.jozo.decoy.CameraExtension` 用 Developer ID `.provisionprofile` の base64 |
+| `APPLE_DEVELOPMENT_TEAM` | Apple Developer Team ID |
+| `APPLE_ID` | notarization 用 Apple ID |
+| `APPLE_APP_PASSWORD` | notarization 用 app-specific password |
+
+profile は Apple Developer Portal で Developer ID 配布用として発行する。host app profile は `com.apple.developer.system-extension.install`、Camera Extension profile は `com.apple.cmio.extension.providerSource` を含むものを使う。
+
+secret 登録後、`v0.0.0-test1` のような SemVer tag を push し、`Release` workflow が archive / export / notarize / staple / Gatekeeper verification / DMG upload まで通ることを確認する。
+
 ## Code Quality Rules
 
 詳細は [`.claude/rules/`](.claude/rules/) 配下。要点：

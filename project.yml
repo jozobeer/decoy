@@ -52,11 +52,14 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_ENTITLEMENTS: Apps/Decoy/Decoy.entitlements
         # CODE_SIGN_STYLE は Manual ― CODE_SIGN_IDENTITY="-" (ad-hoc) と整合する。
-        # release tag workflow では Automatic + DEVELOPMENT_TEAM を inject して上書き。
+        # release tag workflow では Developer ID identity / team / profile specifier を inject して上書き。
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: "$(DECOY_APP_PROVISIONING_PROFILE_SPECIFIER)"
     dependencies:
       - package: DecoyPackage
         product: Domain
@@ -109,6 +112,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Apps/DecoyCameraExtension/DecoyCameraExtension.entitlements
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: "$(DECOY_CAMERA_EXTENSION_PROVISIONING_PROFILE_SPECIFIER)"
 
 schemes:
   Decoy:
