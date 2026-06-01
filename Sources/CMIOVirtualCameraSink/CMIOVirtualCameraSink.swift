@@ -1,4 +1,22 @@
 import Domain
+import Foundation
+
+public enum CMIOVirtualCameraSinkError: Error, Equatable, LocalizedError, Sendable {
+    case cameraExtensionUnavailable(CameraExtensionInstallStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .cameraExtensionUnavailable(.notInstalled):
+            return "Camera Extension がまだインストールされていません"
+        case .cameraExtensionUnavailable(.installing):
+            return "Camera Extension をインストール中です"
+        case .cameraExtensionUnavailable(.needsApproval):
+            return "System Settings で Camera Extension の承認が必要です"
+        case .cameraExtensionUnavailable(.installed):
+            return "Camera Extension は利用可能です"
+        }
+    }
+}
 
 /// `VirtualCameraSink` の本番実装 ― `FrameTransport` (#43) 経由で
 /// Camera Extension に frame を送る adapter。
@@ -22,25 +40,79 @@ import Domain
 ///   自動的に `connect()` を試みる ― caller が接続を意識せず
 ///   `VirtualCameraSink` として使えるようにする。
 /// - `connect()` 自体が失敗した場合はそのエラーを伝播する。
-///
-/// 後続 (#33 stage 2): `CameraExtensionInstaller` (#44) の status を
-/// 購読し、`needsApproval` / `notInstalled` 中は send を諦めて
-/// `.sendFailed` を即 throw する経路を追加する。
 public actor CMIOVirtualCameraSink {
     private let transport: any FrameTransport
+    private let installer: (any CameraExtensionInstaller)?
+    private var installStatus: CameraExtensionInstallStatus?
+    private var statusTask: Task<Void, Never>?
+    private var statusWaiters: [CheckedContinuation<CameraExtensionInstallStatus, Never>] = []
 
-    public init(transport: any FrameTransport) {
+    public init(
+        transport: any FrameTransport,
+        installer: (any CameraExtensionInstaller)? = nil
+    ) {
         self.transport = transport
+        self.installer = installer
+    }
+
+    deinit {
+        statusTask?.cancel()
     }
 }
 
 extension CMIOVirtualCameraSink: VirtualCameraSink {
     public func send(_ frame: Frame) async throws {
+        try await ensureCameraExtensionAvailable()
         do {
             try await transport.send(frame)
         } catch FrameTransportError.notConnected {
             try await transport.connect()
             try await transport.send(frame)
         }
+    }
+}
+
+private extension CMIOVirtualCameraSink {
+    func ensureCameraExtensionAvailable() async throws {
+        guard installer != nil else { return }
+        let status = await currentInstallStatus()
+        guard status == .installed else {
+            throw CMIOVirtualCameraSinkError.cameraExtensionUnavailable(status)
+        }
+    }
+
+    func currentInstallStatus() async -> CameraExtensionInstallStatus {
+        startStatusMonitorIfNeeded()
+        if let installStatus { return installStatus }
+        return await withCheckedContinuation { continuation in
+            statusWaiters.append(continuation)
+        }
+    }
+
+    func startStatusMonitorIfNeeded() {
+        guard statusTask == nil, let installer else { return }
+        statusTask = Task { [weak self, installer] in
+            for await status in await installer.status {
+                await self?.applyInstallStatus(status)
+            }
+            await self?.finishStatusMonitor()
+        }
+    }
+
+    func applyInstallStatus(_ status: CameraExtensionInstallStatus) async {
+        installStatus = status
+        resumeStatusWaiters(with: status)
+        guard status != .installed else { return }
+        await transport.disconnect()
+    }
+
+    func finishStatusMonitor() {
+        resumeStatusWaiters(with: installStatus ?? .notInstalled)
+    }
+
+    func resumeStatusWaiters(with status: CameraExtensionInstallStatus) {
+        let waiters = statusWaiters
+        statusWaiters.removeAll()
+        waiters.forEach { $0.resume(returning: status) }
     }
 }

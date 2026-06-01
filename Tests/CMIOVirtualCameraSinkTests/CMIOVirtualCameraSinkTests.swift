@@ -64,6 +64,53 @@ struct CMIOVirtualCameraSinkTests {
             try await sink.send(f)
         }
     }
+
+    @Test func send_whenInstallerIsNotInstalled_throwsBeforeConnectingTransport() async throws {
+        let transport = InMemoryFrameTransport()
+        let installer = MutableCameraExtensionInstaller(status: .notInstalled)
+        let sink = CMIOVirtualCameraSink(transport: transport, installer: installer)
+
+        await #expect(throws: CMIOVirtualCameraSinkError.cameraExtensionUnavailable(.notInstalled)) {
+            try await sink.send(frame(t: 1, payload: 0xA1))
+        }
+
+        let sent = await transport.sentFrames
+        let connected = await transport.isConnected
+        #expect(sent.isEmpty)
+        #expect(!connected)
+    }
+
+    @Test func send_whenInstallerIsInstalled_connectsAndForwards() async throws {
+        let transport = InMemoryFrameTransport()
+        let installer = MutableCameraExtensionInstaller(status: .installed)
+        let sink = CMIOVirtualCameraSink(transport: transport, installer: installer)
+        let f = frame(t: 1, payload: 0xA1)
+
+        try await sink.send(f)
+
+        let sent = await transport.sentFrames
+        let connected = await transport.isConnected
+        #expect(sent == [f])
+        #expect(connected)
+    }
+
+    @Test func statusChangeAwayFromInstalled_disconnectsTransportAndBlocksSend() async throws {
+        let transport = InMemoryFrameTransport()
+        let installer = MutableCameraExtensionInstaller(status: .installed)
+        let sink = CMIOVirtualCameraSink(transport: transport, installer: installer)
+        let first = frame(t: 1, payload: 0xA1)
+
+        try await sink.send(first)
+        await installer.set(.needsApproval)
+        try await eventually { !(await transport.isConnected) }
+
+        await #expect(throws: CMIOVirtualCameraSinkError.cameraExtensionUnavailable(.needsApproval)) {
+            try await sink.send(frame(t: 2, payload: 0xB2))
+        }
+
+        let sent = await transport.sentFrames
+        #expect(sent == [first])
+    }
 }
 
 private actor FailingConnectTransport: FrameTransport {
@@ -80,4 +127,49 @@ private actor FailingConnectTransport: FrameTransport {
     func send(_ frame: Frame) async throws {
         throw FrameTransportError.notConnected
     }
+}
+
+private actor MutableCameraExtensionInstaller: CameraExtensionInstaller {
+    private var currentStatus: CameraExtensionInstallStatus
+    private var continuations: [UUID: AsyncStream<CameraExtensionInstallStatus>.Continuation] = [:]
+
+    init(status: CameraExtensionInstallStatus) {
+        currentStatus = status
+    }
+
+    var status: AsyncStream<CameraExtensionInstallStatus> {
+        AsyncStream { continuation in
+            let id = UUID()
+            continuation.yield(currentStatus)
+            continuations[id] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeContinuation(id: id) }
+            }
+        }
+    }
+
+    func activate() async {}
+
+    func deactivate() async {
+        set(.notInstalled)
+    }
+
+    func set(_ status: CameraExtensionInstallStatus) {
+        currentStatus = status
+        continuations.values.forEach { $0.yield(status) }
+    }
+
+    private func removeContinuation(id: UUID) {
+        continuations.removeValue(forKey: id)
+    }
+}
+
+private func eventually(
+    _ predicate: @escaping @Sendable () async -> Bool
+) async throws {
+    for _ in 0..<100 {
+        if await predicate() { return }
+        try await Task.sleep(nanoseconds: 1_000_000)
+    }
+    Issue.record("condition was not met")
 }
