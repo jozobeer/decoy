@@ -239,6 +239,14 @@ let package = Package(
         ),
         .testTarget(name: "HotkeyServiceTests", dependencies: ["HotkeyService", "Domain"]),
         .testTarget(
+            name: "MachPortRoundTripTests",
+            dependencies: [
+                "MachPortFrameTransport",
+                "MachPortFrameReceiver",
+                "Domain",
+            ]
+        ),
+        .testTarget(
             name: "MenuBarUITests",
             dependencies: [
                 "MenuBarUI",
